@@ -1,0 +1,1 @@
+ALTER TABLE public.ghl_accounts ADD COLUMN company_id TEXT NOT NULL DEFAULT '';

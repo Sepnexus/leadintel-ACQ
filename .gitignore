@@ -1,0 +1,46 @@
+# ── SECRETS — never commit these ───────────────────────────
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
+*.key
+*.pem
+*.p12
+acq-coach-selfhost/.env
+acq-coach-selfhost/.env.local
+leadintel-selfhost/.env
+leadintel-selfhost/.env.local
+platform-launcher/.env
+# .env.example IS tracked (templates, no secrets)
+!.env.example
+
+# ── OS / IDE ──────────────────────────────────────────────
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── Build artifacts ───────────────────────────────────────
+**/node_modules/
+**/dist/
+**/.next/
+**/build/
+*.log
+
+# ── Docker volumes (data lives in volumes, not in repo) ──
+postgres-data/
+*.pid
+
+# ── Lovable's original .git dirs (preserved on disk for reference) ──
+my-acq-coach-5b771b53/.git-lovable-origin/
+closercontrolleadintel/.git-lovable-origin/
+
+# ── Inner .lovable workspaces (Lovable Cloud metadata) ──
+.lovable/
+
+# ── Local-only tooling ────────────────────────────────────
+*.bak
+*.tmp
+.tmp/

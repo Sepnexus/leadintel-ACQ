@@ -1,0 +1,11 @@
+.env
+.env.local
+.env.*.local
+.DS_Store
+*.log
+node_modules/
+dist/
+apps/web/node_modules/
+apps/web/dist/
+backups/*.sql
+backups/*.dump

@@ -1,0 +1,142 @@
+@import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700;800&family=League+Spartan:wght@400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 96%;
+
+    --card: 0 0% 4%;
+    --card-foreground: 0 0% 96%;
+
+    --popover: 0 0% 4%;
+    --popover-foreground: 0 0% 96%;
+
+    --primary: 107 31% 37%;
+    --primary-foreground: 0 0% 0%;
+    --primary-light: 107 31% 43%;
+    --primary-dark: 107 31% 30%;
+
+    --secondary: 0 0% 7%;
+    --secondary-foreground: 0 0% 96%;
+
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 58%;
+
+    --accent: 0 0% 10%;
+    --accent-foreground: 0 0% 96%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 96%;
+
+    --warning: 36 90% 55%;
+    --info: 213 100% 65%;
+    --purple: 258 73% 76%;
+
+    --surface-1: 0 0% 4%;
+    --surface-2: 0 0% 7%;
+    --surface-3: 0 0% 10%;
+
+    --border: 0 0% 12%;
+    --border-strong: 0 0% 17%;
+    --border-muted: 0 0% 20%;
+
+    --input: 0 0% 12%;
+    --ring: 107 31% 37%;
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Open Sans', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer utilities {
+  .font-mono {
+    font-family: 'League Spartan', sans-serif;
+  }
+
+  .font-heading {
+    font-family: 'League Spartan', sans-serif;
+  }
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+@keyframes bounce-dot {
+  0%, 80%, 100% { transform: scale(0); }
+  40% { transform: scale(1); }
+}
+
+@keyframes flash-highlight {
+  0% { background-color: hsl(var(--primary) / 0.3); }
+  100% { background-color: transparent; }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.fade {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.flash-field {
+  animation: flash-highlight 1.5s ease-out;
+}
+
+/* Stage scroll */
+.stage-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+.stage-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.stage-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 2px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+/* Print styles for Huddle Export */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+    color: black !important;
+  }
+}

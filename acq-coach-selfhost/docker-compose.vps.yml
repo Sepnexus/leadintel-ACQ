@@ -1,0 +1,31 @@
+# VPS overlay — add Traefik routing + use the existing root_default network.
+# Apply with: docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+
+services:
+  acq-coach:
+    ports: !override []   # don't bind ports to host; Traefik handles routing
+    networks:
+      - root_default
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=root_default"
+      - "traefik.http.routers.acq-app.rule=Host(`${PUBLIC_HOST}`)"
+      - "traefik.http.routers.acq-app.entrypoints=web,websecure"
+      - "traefik.http.routers.acq-app.tls=true"
+      - "traefik.http.routers.acq-app.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.acq-app.service=acq-app-svc"
+      - "traefik.http.services.acq-app-svc.loadbalancer.server.port=3000"
+      - "traefik.http.routers.acq-api.rule=Host(`${PUBLIC_API_HOST}`)"
+      - "traefik.http.routers.acq-api.entrypoints=web,websecure"
+      - "traefik.http.routers.acq-api.tls=true"
+      - "traefik.http.routers.acq-api.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.acq-api.service=acq-api-svc"
+      - "traefik.http.services.acq-api-svc.loadbalancer.server.port=54321"
+
+  acq-edge:
+    networks:
+      - root_default
+
+networks:
+  root_default:
+    external: true

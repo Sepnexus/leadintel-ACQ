@@ -1,0 +1,13 @@
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS seller_temperature text;
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS last_offer_date timestamptz;
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS last_offer_feedback text;
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS last_offer_type text;
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS last_offer_made numeric;
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS timeline text;
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS asking_price numeric;
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS condition text;
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS motivation text;
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS seller_note text;
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS lead_identity text;
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS lead_source text;
+ALTER TABLE public.ghl_contacts ADD COLUMN IF NOT EXISTS personality_type text;

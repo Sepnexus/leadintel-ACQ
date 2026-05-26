@@ -1,0 +1,69 @@
+# ACQ Coach self-host.
+# By default this file is LOCAL-MODE: ports bound to localhost, no Traefik,
+# internal bridge network. Run with: `docker compose up -d` from this dir.
+#
+# For VPS deployment, layer on docker-compose.vps.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+
+services:
+  acq-coach:
+    build:
+      context: .
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://localhost:54421}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
+        VITE_SUPABASE_PROJECT_ID: ${VITE_SUPABASE_PROJECT_ID:-acqcoach-selfhost}
+        VITE_PAYMENTS_CLIENT_TOKEN: ${VITE_PAYMENTS_CLIENT_TOKEN:-}
+        VITE_OTHER_APP_URL: ${VITE_OTHER_APP_URL:-http://localhost:3101}
+        VITE_OTHER_APP_NAME: ${VITE_OTHER_APP_NAME:-Lead Intel}
+        VITE_LAUNCHER_URL: ${VITE_LAUNCHER_URL:-http://localhost:8080}
+    image: acq-coach:latest
+    container_name: acq-coach
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${HOST_FRONTEND_PORT:-3100}:3000"
+      - "${HOST_API_PORT:-54421}:54321"
+    volumes:
+      - acq_coach_pgdata:/var/lib/postgresql/data
+    networks:
+      - acq-net
+
+  acq-edge:
+    image: supabase/edge-runtime:v1.58.4
+    container_name: acq-edge
+    restart: unless-stopped
+    depends_on:
+      - acq-coach
+    command:
+      - "start"
+      - "--main-service"
+      - "/home/deno/functions/main"
+    volumes:
+      - ./supabase/functions:/home/deno/functions:ro
+    environment:
+      SUPABASE_URL: "http://acq-coach:54321"
+      SUPABASE_ANON_KEY: "${ANON_KEY}"
+      SUPABASE_SERVICE_ROLE_KEY: "${SERVICE_ROLE_KEY}"
+      SUPABASE_DB_URL: "postgres://postgres:${POSTGRES_PASSWORD}@acq-coach:5432/${POSTGRES_DB:-acqcoach}"
+      JWT_SECRET: "${JWT_SECRET}"
+      OPENAI_API_KEY:           "${OPENAI_API_KEY:-}"
+      DEEPGRAM_API_KEY:         "${DEEPGRAM_API_KEY:-}"
+      ANTHROPIC_API_KEY:        "${ANTHROPIC_API_KEY:-}"
+      STRIPE_TEST_SECRET_KEY:        "${STRIPE_TEST_SECRET_KEY:-}"
+      STRIPE_TEST_PUBLISHABLE_KEY:   "${STRIPE_TEST_PUBLISHABLE_KEY:-}"
+      STRIPE_TEST_WEBHOOK_SECRET:    "${STRIPE_TEST_WEBHOOK_SECRET:-}"
+      STRIPE_LIVE_SECRET_KEY:        "${STRIPE_LIVE_SECRET_KEY:-}"
+      STRIPE_LIVE_PUBLISHABLE_KEY:   "${STRIPE_LIVE_PUBLISHABLE_KEY:-}"
+      STRIPE_LIVE_WEBHOOK_SECRET:    "${STRIPE_LIVE_WEBHOOK_SECRET:-}"
+      CRON_SECRET:              "${CRON_SECRET:-}"
+    networks:
+      - acq-net
+
+volumes:
+  acq_coach_pgdata:
+
+networks:
+  acq-net:
+    driver: bridge

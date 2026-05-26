@@ -1,0 +1,2 @@
+ALTER TABLE public.ghl_accounts ADD COLUMN IF NOT EXISTS is_test boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS ghl_accounts_is_test_idx ON public.ghl_accounts(is_test) WHERE is_test = true;

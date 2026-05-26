@@ -1,0 +1,1 @@
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS stripe_mode text NOT NULL DEFAULT 'test' CHECK (stripe_mode IN ('test','live'));

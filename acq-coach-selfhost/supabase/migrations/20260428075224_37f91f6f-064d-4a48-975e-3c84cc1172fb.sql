@@ -1,0 +1,1 @@
+ALTER VIEW public.usage_summary_by_account SET (security_invoker = true);

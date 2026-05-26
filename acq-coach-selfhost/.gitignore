@@ -1,0 +1,16 @@
+.env
+.env.local
+.env.*.local
+.DS_Store
+*.log
+node_modules/
+dist/
+
+# Apps directory: contents are mirrored from the my-acq-coach-5b771b53 repo.
+# Don't track build artifacts here.
+apps/web/node_modules/
+apps/web/dist/
+
+# Local backups are large and may contain secrets
+backups/*.sql
+backups/*.dump

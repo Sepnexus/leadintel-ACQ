@@ -1,0 +1,1 @@
+ALTER TABLE public.ghl_accounts ADD COLUMN IF NOT EXISTS demo_mode boolean NOT NULL DEFAULT false;

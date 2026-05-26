@@ -1,0 +1,26 @@
+# Git LFS — track Lovable database exports so they don't blow GitHub's
+# 100 MB-per-file hard limit. Anyone cloning needs `git lfs install` first
+# (one-time per machine).
+
+# Custom-format pg_dump files (binary, often 100+ MB each)
+*.dump filter=lfs diff=lfs merge=lfs -text
+
+# Lovable's plain-SQL exports — main ACQ files are 65–85 MB each
+my-acq-coach-5b771b53/backups/migration-export/public_schema.sql filter=lfs diff=lfs merge=lfs -text
+my-acq-coach-5b771b53/backups/migration-export/public_data.sql filter=lfs diff=lfs merge=lfs -text
+closercontrolleadintel/backups/backend-export/01_public_schema.sql filter=lfs diff=lfs merge=lfs -text
+closercontrolleadintel/backups/backend-export/02_public_data_small_inserts.sql filter=lfs diff=lfs merge=lfs -text
+
+# Catch-all for any future huge SQL dump
+*.sql.gz filter=lfs diff=lfs merge=lfs -text
+*.tar.gz filter=lfs diff=lfs merge=lfs -text
+
+# Normal text files — line ending normalization
+*.sh text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

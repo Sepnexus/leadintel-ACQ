@@ -1,0 +1,13 @@
+services:
+  launcher:
+    build: .
+    image: platform-launcher:latest
+    container_name: platform-launcher
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8080}:80"
+    environment:
+      ACQ_URL: "${ACQ_URL:-http://localhost:3100}"
+      ACQ_API_URL: "${ACQ_API_URL:-http://localhost:54421}"
+      LEADINTEL_URL: "${LEADINTEL_URL:-http://localhost:3101}"
+      LEADINTEL_API_URL: "${LEADINTEL_API_URL:-http://localhost:54422}"

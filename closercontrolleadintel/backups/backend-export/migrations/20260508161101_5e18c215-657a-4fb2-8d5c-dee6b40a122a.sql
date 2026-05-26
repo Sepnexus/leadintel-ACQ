@@ -1,0 +1,1 @@
+UPDATE public.platform_settings SET ai_markup_multiplier = 7.0, updated_at = now() WHERE id = true;

@@ -1,0 +1,19 @@
+project_id = "wgnlnorxhfephwshuzvr"
+
+[functions.payments-webhook]
+verify_jwt = false
+
+[functions.check-notes-access]
+verify_jwt = false
+
+[functions.sync-resume-cron]
+verify_jwt = false
+
+[functions.sync-all-tenants-cron]
+verify_jwt = false
+
+[functions.delete-tenant]
+verify_jwt = false
+
+[functions.map-all-tenants-fields]
+verify_jwt = false

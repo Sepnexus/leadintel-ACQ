@@ -1,0 +1,13 @@
+project_id = "palblvwzgkmajmwquqah"
+
+[functions.payments-webhook]
+verify_jwt = false
+
+[functions.create-topup-session]
+verify_jwt = false
+
+[functions.cron-sync]
+verify_jwt = false
+
+[functions.auto-recharge-cron]
+verify_jwt = false
