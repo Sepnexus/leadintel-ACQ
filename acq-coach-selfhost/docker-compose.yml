@@ -58,6 +58,8 @@ services:
       STRIPE_LIVE_PUBLISHABLE_KEY:   "${STRIPE_LIVE_PUBLISHABLE_KEY:-}"
       STRIPE_LIVE_WEBHOOK_SECRET:    "${STRIPE_LIVE_WEBHOOK_SECRET:-}"
       CRON_SECRET:              "${CRON_SECRET:-}"
+      RESEND_API_KEY:           "${RESEND_API_KEY:-}"
+      DIGEST_FROM_EMAIL:        "${DIGEST_FROM_EMAIL:-digest@acqcoach.com}"
     networks:
       - acq-net
 
