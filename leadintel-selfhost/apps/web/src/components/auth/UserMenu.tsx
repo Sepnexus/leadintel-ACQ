@@ -33,7 +33,15 @@ export function UserMenu({ onOpenSettings, compact }: UserMenuProps) {
   async function handleLogout() {
     setOpen(false);
     await signOut();
-    navigate("/login", { replace: true });
+    // Clear this origin's auth, then enter the cross-app logout chain at its head
+    // (ACQ Coach), which clears BOTH apps and ends at the platform launcher (8080).
+    try {
+      Object.keys(localStorage).forEach(k => {
+        if (k.startsWith("sb-") || k.startsWith("cc_")) localStorage.removeItem(k);
+      });
+    } catch { /* noop */ }
+    const acqUrl = (import.meta.env.VITE_OTHER_APP_URL as string | undefined) || "http://localhost:3100";
+    window.location.href = `${acqUrl}/?logout=true`;
   }
 
   function handleChangePassword() {

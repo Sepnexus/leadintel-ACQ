@@ -69,6 +69,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     localStorage.clear();
     setWho(null);
+    // Enter the cross-app logout chain at its head (this app, ACQ Coach):
+    // ?logout=true → clears ACQ → Lead Intel?logout → clears LI → launcher (8080).
+    // This guarantees logout always ends at the platform launcher, never ACQ's
+    // own /login screen.
+    window.location.href = `${window.location.origin}/?logout=true`;
   }, []);
 
   return <AuthCtx.Provider value={{ session, loading, who, refreshWho, signOut }}>{children}</AuthCtx.Provider>;

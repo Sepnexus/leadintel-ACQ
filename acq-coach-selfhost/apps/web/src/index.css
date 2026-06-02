@@ -163,3 +163,36 @@ All colors MUST be HSL.
   letter-spacing: 0.04em;
 }
 .cc-admin-scroll { overflow-y: auto; height: 100vh; }
+
+/* Light variant — gated on a root <html> class so it also reaches portaled
+   dialogs / dropdowns that carry the .cc-admin class outside the page tree.
+   Overrides only the scoped tokens; .cc-admin's background/color recompute. */
+html.cc-theme-light .cc-admin {
+  --background: 90 12% 97%;
+  --foreground: 120 26% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 120 26% 12%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 120 26% 12%;
+  --primary: 100 35% 32%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 120 8% 94%;
+  --secondary-foreground: 120 26% 12%;
+  --muted: 120 8% 93%;
+  --muted-foreground: 120 10% 38%;
+  --accent: 120 10% 90%;
+  --accent-foreground: 120 26% 12%;
+  --destructive: 6 63% 44%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 120 12% 86%;
+  --input: 120 12% 86%;
+  --ring: 100 35% 36%;
+  --sidebar-background: 90 12% 96%;
+  --sidebar-foreground: 120 10% 32%;
+  --sidebar-primary: 100 35% 34%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 120 10% 90%;
+  --sidebar-accent-foreground: 120 26% 12%;
+  --sidebar-border: 120 12% 86%;
+  --sidebar-ring: 100 35% 36%;
+}

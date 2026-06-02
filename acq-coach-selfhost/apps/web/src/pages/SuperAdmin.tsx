@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Building2, Users, Wallet, TrendingUp, Activity, LogOut, Plus, Search, RefreshCw,
   Play, KeyRound, Pencil, ExternalLink, Settings as SettingsIcon, Eye, Zap,
+  Sun, Moon,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,19 @@ const SECTIONS: { id: Section; label: string; icon: any }[] = [
 export default function SuperAdmin({ onImpersonate }: { onImpersonate?: (id: string) => void }) {
   const { who, signOut } = useAuth();
   const [section, setSection] = useState<Section>("customers");
+  const [theme, setTheme] = useState<string>(() => {
+    try { return localStorage.getItem("acqcoach_theme") || "dark"; } catch { return "dark"; }
+  });
+  useEffect(() => {
+    document.documentElement.classList.toggle("cc-theme-light", theme === "light");
+  }, [theme]);
+  function toggleTheme() {
+    setTheme(prev => {
+      const next = prev === "dark" ? "light" : "dark";
+      try { localStorage.setItem("acqcoach_theme", next); } catch { /* noop */ }
+      return next;
+    });
+  }
 
   return (
     <div className="cc-admin">
@@ -85,6 +99,15 @@ export default function SuperAdmin({ onImpersonate }: { onImpersonate?: (id: str
             <div className="font-display text-sm uppercase tracking-wider text-muted-foreground">
               {SECTIONS.find(s => s.id === section)?.label}
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="ml-auto h-8 w-8 text-muted-foreground"
+              onClick={toggleTheme}
+              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
           </header>
           <div className="p-4 sm:p-6 max-w-[1600px] mx-auto">
             {section === "customers" && <CustomersTab onImpersonate={onImpersonate} />}

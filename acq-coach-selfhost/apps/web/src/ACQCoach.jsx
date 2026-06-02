@@ -3062,7 +3062,7 @@ function matchCoachingFocus(focusTxt,cats){
   return matched;
 }
 
-function Sidebar({reps,selectedRep,onSelect,onLeaderboard,accountId}){
+function Sidebar({reps,selectedRep,onSelect,onLeaderboard,accountId,onResumeSetup}){
   const safeReps=Array.isArray(reps)?reps.filter(Boolean):[];
   const teamAvg=safeReps.length?Math.round(safeReps.reduce((a,r)=>a+(r?.avg||0),0)/safeReps.length):0;
   const totalWeek=safeReps.reduce((a,r)=>a+(r?.week||0),0);
@@ -3243,6 +3243,25 @@ function Sidebar({reps,selectedRep,onSelect,onLeaderboard,accountId}){
           </div>
           {digestLastSent&&<div style={{fontSize:10,color:T3,marginTop:2,opacity:.7}}>Last sent {new Date(digestLastSent).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>}
         </button>
+        {/* Resume Setup — shown when onboarding was dismissed but not yet complete */}
+        {(()=>{
+          let show=false;
+          try{
+            show=!!accountId
+              &&localStorage.getItem(`acqcoach_onboarding_dismissed_${accountId}`)==="1"
+              &&localStorage.getItem(`acqcoach_onboarding_done_${accountId}`)!=="1";
+          }catch(e){}
+          if(!show)return null;
+          return(
+            <button onClick={onResumeSetup}
+              style={{width:"100%",marginTop:7,background:"transparent",border:`1px dashed ${GREEN}66`,borderRadius:6,padding:"7px 10px",
+                color:GREEN,fontSize:12,fontWeight:700,cursor:"pointer",textAlign:"left",transition:"border-color .12s"}}
+              onMouseEnter={e=>e.currentTarget.style.borderColor=GREEN}
+              onMouseLeave={e=>e.currentTarget.style.borderColor=GREEN+"66"}>
+              🚀 Resume Setup
+            </button>
+          );
+        })()}
       </div>
 
       {/* ── Coaching Focus Modal ── */}
@@ -3824,6 +3843,142 @@ function OpportunityCard({opp,ghlUsers,accountId,onViewAccounts,heatColor}){
 }
 
 // ── DASHBOARD ─────────────────────────────────────────────────────────────────
+// ── ONBOARDING ──────────────────────────────────────────────────────────────
+// New-customer setup checklist. Shows as a dismissable banner above the Dashboard
+// when the account is fresh (no reps + no scored calls) and not yet complete.
+function hasCoachingFocus(accountId){
+  try{
+    const prefix=`acqcoach_coaching_focus_${accountId}_`;
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.startsWith(prefix)&&(localStorage.getItem(k)||"").trim())return true;
+    }
+  }catch(e){}
+  return false;
+}
+
+function OnboardingBanner({accountId,reps,scoredCallCount,ghlConnected,dismissed,onDismiss,onGoSettings,onScoreCall}){
+  const [focusOpen,setFocusOpen]=useState(false);
+  const [focusVal,setFocusVal]=useState("");
+  const [focusTick,setFocusTick]=useState(0); // bumped after saving focus → forces re-read
+
+  const repList=Array.isArray(reps)?reps.filter(Boolean):[];
+  const firstRep=repList[0]||null;
+
+  // ── Step completion ──
+  const step1=!!ghlConnected;
+  const step2=repList.length>=1;
+  const step3=(scoredCallCount||0)>=1;
+  const step4=(focusTick,hasCoachingFocus(accountId));
+  const steps=[
+    {key:"ghl",  done:step1, title:"Connect GoHighLevel",  desc:"Link your GHL location so calls sync automatically.",            cta:"Open Settings", action:onGoSettings},
+    {key:"rep",  done:step2, title:"Add your first rep",   desc:"Add a rep to your team so their calls get scored and coached.", cta:"Add Rep",       action:onGoSettings},
+    {key:"call", done:step3, title:"Score your first call",desc:"Paste or upload a call transcript to get AI scoring.",           cta:"Score a Call",  action:onScoreCall},
+    {key:"focus",done:step4, title:"Set a coaching focus",
+      desc:firstRep?`Pick a skill to coach ${firstRep.name||"your rep"} on this week.`:"Add a rep first to set a coaching focus.",
+      cta:"Set Focus", action:()=>setFocusOpen(true), locked:!firstRep},
+  ];
+  const completeCount=steps.filter(s=>s.done).length;
+  const allComplete=completeCount===4;
+
+  const doneKey=`acqcoach_onboarding_done_${accountId}`;
+  const startedKey=`acqcoach_onboarding_started_${accountId}`;
+  const done=(()=>{try{return localStorage.getItem(doneKey)==="1";}catch(e){return false;}})();
+  const started=(()=>{try{return localStorage.getItem(startedKey)==="1";}catch(e){return false;}})();
+  // Fresh-account trigger; "started" makes it sticky through completion.
+  const eligible=started||(repList.length===0&&(scoredCallCount||0)===0);
+
+  useEffect(()=>{
+    if(accountId&&eligible&&!started&&!done){try{localStorage.setItem(startedKey,"1");}catch(e){}}
+  },[accountId,eligible,started,done,startedKey]);
+
+  // Celebration fires when the account reaches all-complete during this session
+  // (including the moment the user finishes the final step), then persists "done"
+  // so it never shows again after reload.
+  const [celebrate,setCelebrate]=useState(false);
+  useEffect(()=>{
+    if(accountId&&eligible&&allComplete&&!done){
+      setCelebrate(true);
+      try{localStorage.setItem(doneKey,"1");}catch(e){}
+    }
+  },[accountId,eligible,allComplete,done,doneKey]);
+
+  // ── Visibility gates ──
+  if(!accountId||!eligible)return null;
+  if(allComplete){
+    if(!celebrate)return null; // already celebrated → hidden permanently
+    return(
+      <div style={{margin:"14px 22px 0",background:"rgba(78,125,61,0.10)",border:`1px solid ${GREEN}55`,borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"12px 16px",display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+        <span style={{fontSize:18}}>🎉</span>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,fontWeight:800,color:GREEN}}>Setup complete!</div>
+          <div style={{fontSize:12,color:T2,marginTop:2}}>Your account is fully configured. Happy coaching.</div>
+        </div>
+        <button onClick={()=>setCelebrate(false)} title="Dismiss" style={{background:"transparent",border:"none",color:T3,fontSize:16,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>✕</button>
+      </div>
+    );
+  }
+  if(dismissed)return null;
+
+  const pct=Math.round((completeCount/4)*100);
+
+  return(
+    <div style={{margin:"14px 22px 0",background:S1,border:`1px solid ${B1}`,borderLeft:`3px solid ${GREEN}`,borderRadius:8,overflow:"hidden",flexShrink:0}} className="fade">
+      <div style={{padding:"12px 16px",borderBottom:`1px solid ${B1}`}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:15}}>🚀</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:800,color:TEXT,letterSpacing:"0.02em"}}>Finish setting up your account</div>
+            <div style={{fontSize:11,color:T3,marginTop:1}}>{completeCount} of 4 steps complete</div>
+          </div>
+          <button onClick={onDismiss} title="Dismiss — resume later from the sidebar" style={{background:"transparent",border:"none",color:T3,fontSize:16,cursor:"pointer",lineHeight:1,padding:"0 4px"}}>✕</button>
+        </div>
+        <div style={{height:5,background:S2,borderRadius:3,overflow:"hidden",marginTop:10}}>
+          <div style={{width:`${pct}%`,height:"100%",background:GREEN,borderRadius:3,transition:"width .4s ease"}}/>
+        </div>
+      </div>
+      <div style={{padding:"6px 8px",display:"flex",flexDirection:"column",gap:2}}>
+        {steps.map((s,i)=>(
+          <div key={s.key} style={{display:"flex",alignItems:"center",gap:12,padding:"9px 10px",borderRadius:6,opacity:s.done?0.55:1,background:s.done?"transparent":S2+"55"}}>
+            <div style={{width:20,height:20,borderRadius:"50%",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",
+              background:s.done?GREEN:"transparent",border:`1px solid ${s.done?GREEN:B3}`,color:s.done?"#fff":T3,fontSize:11,fontWeight:900}}>
+              {s.done?"✓":i+1}
+            </div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12.5,fontWeight:700,color:TEXT,textDecoration:s.done?"line-through":"none"}}>{s.title}</div>
+              <div style={{fontSize:11,color:T3,marginTop:1}}>{s.desc}</div>
+            </div>
+            {s.done
+              ? <span style={{flexShrink:0,fontSize:11,fontWeight:700,color:GREEN}}>Done</span>
+              : <button onClick={s.action} disabled={s.locked}
+                  style={{flexShrink:0,background:s.locked?"transparent":GREEN,border:s.locked?`1px solid ${B3}`:"none",color:s.locked?T3:"#fff",borderRadius:6,padding:"6px 12px",fontSize:11.5,fontWeight:700,cursor:s.locked?"default":"pointer",whiteSpace:"nowrap",opacity:s.locked?0.6:1}}>
+                  {s.cta}
+                </button>}
+          </div>
+        ))}
+      </div>
+      {focusOpen&&firstRep&&(
+        <div style={{padding:"0 16px 14px"}}>
+          <div style={{background:S2,border:`1px solid ${B2}`,borderRadius:8,padding:12}}>
+            <div style={{fontSize:11.5,fontWeight:700,color:TEXT,marginBottom:6}}>Coaching focus for {firstRep.name||"your rep"}</div>
+            <textarea value={focusVal} onChange={e=>setFocusVal(e.target.value)} autoFocus
+              placeholder="e.g. Improve objection handling on price pushback"
+              style={{width:"100%",boxSizing:"border-box",minHeight:54,background:S1,border:`1px solid ${B1}`,borderRadius:6,padding:"8px 10px",color:TEXT,fontSize:12,resize:"vertical",outline:"none",fontFamily:"'Open Sans',sans-serif"}}/>
+            <div style={{display:"flex",gap:8,marginTop:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>{setFocusOpen(false);setFocusVal("");}} style={{background:"transparent",border:`1px solid ${B3}`,color:T2,borderRadius:6,padding:"6px 12px",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Cancel</button>
+              <button onClick={()=>{
+                const v=focusVal.trim(); if(!v)return;
+                try{localStorage.setItem(`acqcoach_coaching_focus_${accountId}_${firstRep.id}`,v);}catch(e){}
+                setFocusOpen(false);setFocusVal("");setFocusTick(t=>t+1);
+              }} style={{background:GREEN,border:"none",color:"#fff",borderRadius:6,padding:"6px 14px",fontSize:11.5,fontWeight:700,cursor:"pointer"}}>Save Focus</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Dashboard({rep,calls,reps,onScore,onScoreCall,onViewReport,onPractice,pendingCalls=[],annotations,onAnnotate,ghlAccounts,selectedAccount,onAccountChange,escalations=[],onDismissEscalation,onDismissAllEscalations,onViewEscalation}){
   if(!rep)return<div style={{padding:24,color:"#888",fontSize:13}}>No rep selected.</div>;
   const repCalls=(calls||[]).filter(c=>c.repId===rep.id);
@@ -4878,6 +5033,12 @@ export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
   const notifBellRef=useRef(null);
   const [preloadTranscript,setPreloadTranscript]=useState("");
   const [autoScoreOnLoad,setAutoScoreOnLoad]=useState(false);
+  // Onboarding banner dismissed-state, lifted so the sidebar "Resume Setup" can re-show it.
+  const [onbDismissed,setOnbDismissed]=useState(false);
+  useEffect(()=>{
+    if(!selectedAccount){setOnbDismissed(false);return;}
+    try{setOnbDismissed(localStorage.getItem(`acqcoach_onboarding_dismissed_${selectedAccount}`)==="1");}catch(e){setOnbDismissed(false);}
+  },[selectedAccount]);
 
   // Persisted account selector — saves to / reads from localStorage
   const LS_ACCT_KEY="acqcoach_last_account";
@@ -5391,7 +5552,7 @@ export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
               style={{
                 background:S2,border:`1px solid ${B1}`,borderRadius:6,
                 padding:"4px 10px",color:TEXT,fontSize:12,fontWeight:600,
-                outline:"none",cursor:"pointer",maxWidth:200,marginRight:10,
+                outline:"none",cursor:"pointer",minWidth:160,maxWidth:220,marginRight:10,
                 fontFamily:"'Open Sans',sans-serif",
               }}
             >
@@ -5518,22 +5679,43 @@ export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
             <Sidebar reps={reps} selectedRep={selectedRep}
               onSelect={rep=>{setSelectedRep(rep);setView("dashboard");}}
               onLeaderboard={()=>setView("leaderboard")}
-              accountId={selectedAccount}/>
+              accountId={selectedAccount}
+              onResumeSetup={()=>{
+                try{localStorage.removeItem(`acqcoach_onboarding_dismissed_${selectedAccount}`);}catch(e){}
+                setOnbDismissed(false);
+                setView("dashboard");
+              }}/>
           )}
           <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
-            {view==="dashboard"&&
-              <Dashboard rep={selectedRep} calls={calls} reps={reps}
-                onScore={()=>setView("submit")}
-                onScoreCall={handleScoreCall}
-                onViewReport={handleViewReport}
-                onPractice={()=>setView("roleplay")}
-                pendingCalls={pendingCalls}
-                annotations={annotations} onAnnotate={addAnnotation}
-                ghlAccounts={ghlAccounts} selectedAccount={selectedAccount} onAccountChange={selectAccount}
-                escalations={escalations}
-                onDismissEscalation={dismissEscalation}
-                onDismissAllEscalations={dismissAllEscalations}
-                onViewEscalation={handleViewEscalation}/>}
+            {view==="dashboard"&&(
+              <>
+                <OnboardingBanner
+                  accountId={selectedAccount}
+                  reps={reps}
+                  scoredCallCount={calls.length}
+                  ghlConnected={!!(ghlAccounts.find(a=>a.id===selectedAccount)?.location_id)}
+                  dismissed={onbDismissed}
+                  onDismiss={()=>{
+                    try{localStorage.setItem(`acqcoach_onboarding_dismissed_${selectedAccount}`,"1");}catch(e){}
+                    setOnbDismissed(true);
+                  }}
+                  onGoSettings={()=>setView("settings")}
+                  onScoreCall={()=>setView("submit")}
+                />
+                <Dashboard rep={selectedRep} calls={calls} reps={reps}
+                  onScore={()=>setView("submit")}
+                  onScoreCall={handleScoreCall}
+                  onViewReport={handleViewReport}
+                  onPractice={()=>setView("roleplay")}
+                  pendingCalls={pendingCalls}
+                  annotations={annotations} onAnnotate={addAnnotation}
+                  ghlAccounts={ghlAccounts} selectedAccount={selectedAccount} onAccountChange={selectAccount}
+                  escalations={escalations}
+                  onDismissEscalation={dismissEscalation}
+                  onDismissAllEscalations={dismissAllEscalations}
+                  onViewEscalation={handleViewEscalation}/>
+              </>
+            )}
             {view==="leaderboard"&&
               <Leaderboard reps={reps} calls={calls}
                 onBack={()=>setView("dashboard")}

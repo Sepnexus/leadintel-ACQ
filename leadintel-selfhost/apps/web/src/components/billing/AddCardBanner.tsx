@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCurrentTenant } from "@/hooks/useCurrentTenant";
+import { COLORS } from "@/utils/leadUtils";
 
 /**
  * Subtle banner prompting tenants without a saved card to add one
@@ -40,8 +41,9 @@ export function AddCardBanner() {
 
   return (
     <div style={{
-      background: "rgba(255,255,255,0.03)",
-      border: "1px solid rgba(255,255,255,0.10)",
+      background: COLORS.S2,
+      border: "1px solid " + COLORS.AMB + "40",
+      borderLeft: "3px solid " + COLORS.AMB,
       borderRadius: 10,
       padding: "10px 14px",
       margin: "0 0 14px 0",
@@ -52,18 +54,18 @@ export function AddCardBanner() {
       fontFamily: "'Open Sans', sans-serif",
     }}>
       <span style={{
-        width: 6, height: 6, borderRadius: "50%",
-        background: "#e0a64a", flexShrink: 0,
+        width: 7, height: 7, borderRadius: "50%",
+        background: COLORS.AMB, flexShrink: 0,
       }} />
-      <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: "#cfcfcf", lineHeight: 1.5 }}>
+      <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: COLORS.TEXT, lineHeight: 1.5 }}>
         Add a payment method to keep Lead Intel running without interruption.
       </div>
       <Link
         to="/billing"
         style={{
           background: "transparent",
-          border: "1px solid rgba(78,125,61,0.6)",
-          color: "#a9d49a",
+          border: "1px solid " + COLORS.GRN + "80",
+          color: COLORS.GRN,
           padding: "6px 14px",
           borderRadius: 7,
           fontSize: 12,
@@ -79,7 +81,7 @@ export function AddCardBanner() {
         onClick={() => setDismissed(true)}
         aria-label="Dismiss"
         style={{
-          background: "transparent", border: "none", color: "#777",
+          background: "transparent", border: "none", color: COLORS.T3,
           fontSize: 16, cursor: "pointer", padding: "2px 6px", lineHeight: 1,
         }}
       >×</button>

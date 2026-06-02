@@ -1,59 +1,13 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Sepnexus Platform</title>
-  <link rel="stylesheet" href="/styles.css" />
-  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><circle cx='32' cy='32' r='30' fill='%231a1a2e'/><text x='32' y='42' font-size='32' text-anchor='middle' fill='%2300ff88' font-family='monospace' font-weight='bold'>S</text></svg>" />
-</head>
-<body>
-  <header>
-    <div class="brand">
-      <span class="logo">S</span>
-      <span>Sepnexus Platform</span>
-    </div>
-    <div class="status" id="status">
-      <span class="pill" data-app="acq">ACQ: checking…</span>
-      <span class="pill" data-app="leadintel">Lead Intel: checking…</span>
-    </div>
-  </header>
-
-  <main>
-    <h1>Choose an app</h1>
-    <p class="sub">Both apps are independent (separate auth, separate database) for now. Phase 2 will merge them.</p>
-
-    <div class="cards">
-      <a class="card acq" id="card-acq" href="#">
-        <div class="badge">ACQ</div>
-        <h2>ACQ Coach</h2>
-        <p>Call scoring, transcription, GHL conversation sync. Wallet-billed AI usage.</p>
-        <ul>
-          <li>9 edge functions</li>
-          <li>18 tables · 35 RLS policies</li>
-          <li>OpenAI · Deepgram · Stripe · GHL</li>
-        </ul>
-        <button class="open">Open ACQ →</button>
-      </a>
-
-      <a class="card leadintel" id="card-leadintel" href="#">
-        <div class="badge">LI</div>
-        <h2>Lead Intel</h2>
-        <p>Multi-tenant GHL CRM with Claude-powered lead intelligence. Daily AI briefings.</p>
-        <ul>
-          <li>29 edge functions</li>
-          <li>24 tables · 70 RLS policies · 30 FKs</li>
-          <li>Anthropic · Deepgram · Stripe · GHL</li>
-        </ul>
-        <button class="open">Open Lead Intel →</button>
-      </a>
-    </div>
-
-    <footer>
-      <small>Phase 1: independent apps for verification. Phase 2: unified auth + merged shell.</small>
-    </footer>
-  </main>
-
-  <script src="/launcher.js" defer></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Closer Control · Platform</title>
+    <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23000'/><text x='32' y='44' font-size='30' text-anchor='middle' fill='%234e7d3d' font-family='monospace' font-weight='bold'>CC</text></svg>" />
+  </head>
+  <body style="margin:0">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

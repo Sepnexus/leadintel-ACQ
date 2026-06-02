@@ -329,24 +329,33 @@ const DRILL_PROMPTS={
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 function gc(s){return s>=80?GREEN:s>=65?AMBER:RED}
 function grade(s){return s>=90?"A":s>=82?"B+":s>=75?"B":s>=68?"B-":s>=62?"C+":s>=55?"C":s>=48?"D":"F"}
-function catStatus(s){return s>=8?"strong":s>=6?"ok":s>=4?"weak":"critical"}
-function catColor(st){return st==="strong"?GREEN:st==="ok"?AMBER:RED}
-function catLabel(st){return st==="strong"?"Strong":st==="ok"?"Developing":st==="weak"?"Needs Work":"Critical"}
+function catStatus(s){if(isNaN(s)||s==null)return"no-data";return s>=8?"strong":s>=6?"ok":s>=4?"weak":"critical"}
+function catColor(st){return st==="strong"?GREEN:st==="ok"?AMBER:st==="no-data"?T3:RED}
+function catLabel(st){return st==="strong"?"Strong":st==="ok"?"Developing":st==="weak"?"Needs Work":st==="no-data"?"No calls yet":"Critical"}
 
 function getRepCategoryScores(rep){
   if(rep?.categoryAverages?.length){
     return rep.categoryAverages.map(cat=>({
-      name:cat.name,score:cat.score,status:cat.status||catStatus(cat.score)
+      name:cat.name,
+      score:isNaN(cat.score)?0:cat.score,
+      status:cat.status||(cat.score>0?catStatus(cat.score):"no-data"),
     }));
   }
-  // Simulate category scores based on rep's average score with variation
-  const base=rep.avg;
-  const seed=rep.id*7;
+  // No scored calls yet — return explicit zero / no-data for all categories.
+  const avg=isNaN(rep?.avg)?0:Number(rep?.avg||0);
+  if(!avg&&!rep?.total){
+    return CATEGORIES.map(name=>({name,score:0,status:"no-data"}));
+  }
+  // Simulate category scores based on rep's average score with variation.
+  // rep.id may be a string ("ghl-xxx…") for DB reps — use a char-code hash
+  // instead of direct multiplication so we never get NaN.
+  const seedStr=String(rep.id||rep.ghlUserId||"");
+  const seed=seedStr.split("").reduce((a,c)=>a+c.charCodeAt(0),0);
   return CATEGORIES.map((name,i)=>{
-    const offset=((seed+i*13)%21)-10; // -10 to +10 variation
-    const score=Math.max(1,Math.min(10,Math.round((base/10)+offset/3)));
-    const status=catStatus(score);
-    return{name,score,status};
+    const offset=((seed+i*13)%21)-10;
+    const raw=Math.round((avg/10)+offset/3);
+    const score=Math.max(0,Math.min(10,isNaN(raw)?0:raw));
+    return{name,score,status:score>0?catStatus(score):"no-data"};
   });
 }
 
@@ -631,13 +640,23 @@ function PatternDetection({rep}){
 // ── SCORECARD TAB ─────────────────────────────────────────────────────────────
 function ScorecardTab({rep}){
   const cats=getRepCategoryScores(rep);
+  const hasData=cats.some(c=>c.status!=="no-data"&&c.score>0);
   const sorted=[...cats].sort((a,b)=>a.score-b.score);
-  const focusAreas=sorted.slice(0,3);
+  // Only show focus areas for categories that have real data
+  const focusAreas=sorted.filter(c=>c.status!=="no-data"&&c.score>0).slice(0,3);
   return(
     <div className="fade">
+      {!hasData&&(
+        <div style={{background:S1,border:`1px solid ${B1}`,borderRadius:8,padding:"16px",marginBottom:16,textAlign:"center"}}>
+          <div style={{fontSize:13,color:T2,fontFamily:"'Open Sans',sans-serif"}}>
+            No scored calls yet. Your scorecard will populate once calls are reviewed.
+          </div>
+        </div>
+      )}
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
         {cats.map(cat=>{
-          const pct=(cat.score/10)*100;
+          const safeScore=isNaN(cat.score)?0:cat.score;
+          const pct=safeScore>0?(safeScore/10)*100:0;
           const color=catColor(cat.status);
           return(
             <div key={cat.name} style={{display:"flex",alignItems:"center",gap:12}}>
@@ -645,27 +664,31 @@ function ScorecardTab({rep}){
               <div style={{flex:1,height:18,background:S2,borderRadius:4,overflow:"hidden",position:"relative"}}>
                 <div style={{width:`${pct}%`,height:"100%",background:color,borderRadius:4,transition:"width .6s"}}/>
               </div>
-              <div style={{width:28,fontSize:13,fontWeight:700,color,textAlign:"right",fontFamily:"'Open Sans',sans-serif",letterSpacing:"0.04em"}}>{cat.score}</div>
-              <div style={{width:70,fontSize:13,color,fontWeight:600,fontFamily:"'Open Sans',sans-serif"}}>{catLabel(cat.status)}</div>
+              <div style={{width:28,fontSize:13,fontWeight:700,color,textAlign:"right",fontFamily:"'Open Sans',sans-serif",letterSpacing:"0.04em"}}>
+                {cat.status==="no-data"?"—":safeScore}
+              </div>
+              <div style={{width:80,fontSize:12,color,fontWeight:600,fontFamily:"'Open Sans',sans-serif"}}>{catLabel(cat.status)}</div>
             </div>
           );
         })}
       </div>
-      {/* Focus Areas */}
-      <div style={{marginTop:24}}>
-        <div style={{fontSize:12,fontWeight:600,color:T3,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:12,fontFamily:"'Open Sans',sans-serif"}}>Your 3 Focus Areas This Week</div>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {focusAreas.map(cat=>{
-            const drill=DRILL_PROMPTS[cat.name];
-            return(
-              <div key={cat.name} style={{background:cat.status==="critical"?"#0f0a0a":"#0f0d08",border:`1px solid ${B1}`,borderLeft:`3px solid ${catColor(cat.status)}`,borderRadius:8,padding:"12px 14px"}}>
-                <div style={{fontSize:13,fontWeight:700,color:TEXT,marginBottom:4,fontFamily:"'Open Sans',sans-serif"}}>{cat.name} — {cat.score}/10</div>
-                {drill&&<div style={{fontSize:12,color:T2,lineHeight:1.6,fontFamily:"'Open Sans',sans-serif"}}>{drill.tip}</div>}
-              </div>
-            );
-          })}
+      {/* Focus Areas — only render when there is real scored data */}
+      {focusAreas.length>0&&(
+        <div style={{marginTop:24}}>
+          <div style={{fontSize:12,fontWeight:600,color:T3,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:12,fontFamily:"'Open Sans',sans-serif"}}>Your 3 Focus Areas This Week</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {focusAreas.map(cat=>{
+              const drill=DRILL_PROMPTS[cat.name];
+              return(
+                <div key={cat.name} style={{background:cat.status==="critical"?"#0f0a0a":"#0f0d08",border:`1px solid ${B1}`,borderLeft:`3px solid ${catColor(cat.status)}`,borderRadius:8,padding:"12px 14px"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:TEXT,marginBottom:4,fontFamily:"'Open Sans',sans-serif"}}>{cat.name} — {isNaN(cat.score)?0:cat.score}/10</div>
+                  {drill&&<div style={{fontSize:12,color:T2,lineHeight:1.6,fontFamily:"'Open Sans',sans-serif"}}>{drill.tip}</div>}
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
       {/* Pattern Detection */}
       <PatternDetection rep={rep}/>
     </div>

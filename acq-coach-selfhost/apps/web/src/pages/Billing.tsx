@@ -23,10 +23,12 @@ import { cn } from "@/lib/utils";
 
 const PRESETS = [25, 50, 100, 250];
 
-export default function Billing({ onBack }: { onBack?: () => void }) {
+export default function Billing({ onBack, accountId: propAccountId }: { onBack?: () => void; accountId?: string | null }) {
   const { who, session } = useAuth();
   const { toast } = useToast();
-  const accountId = who?.admin_account_ids?.[0] || null;
+  // propAccountId is supplied when a super_admin is viewing a specific customer.
+  // Fallback to the caller's own account_admin entry for regular admins.
+  const accountId = propAccountId || who?.admin_account_ids?.[0] || null;
 
   const { data, isLoading, error, refetch } = useAdminQuery<any>(
     ["billing", accountId || ""],
