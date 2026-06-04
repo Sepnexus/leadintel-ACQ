@@ -24,6 +24,7 @@ services:
       - leadintel_pgdata:/var/lib/postgresql/data
     networks:
       - leadintel-net
+      - platform-shared
 
   leadintel-edge:
     image: supabase/edge-runtime:v1.58.4
@@ -54,8 +55,11 @@ services:
       CRON_SECRET:              "${CRON_SECRET:-}"
       GHL_PIT_TOKEN:            "${GHL_PIT_TOKEN:-}"
       GHL_LOCATION_ID:          "${GHL_LOCATION_ID:-}"
+      # Hour 1: shared identity + entitlement DB
+      PLATFORM_DB_URL:          "${PLATFORM_DB_URL:-}"
     networks:
       - leadintel-net
+      - platform-shared
 
 volumes:
   leadintel_pgdata:
@@ -63,3 +67,6 @@ volumes:
 networks:
   leadintel-net:
     driver: bridge
+  platform-shared:
+    name: platform-shared
+    external: true

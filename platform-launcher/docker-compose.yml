@@ -6,8 +6,25 @@ services:
     restart: unless-stopped
     ports:
       - "${HOST_PORT:-8080}:80"
+    env_file:
+      - .env
     environment:
       ACQ_URL: "${ACQ_URL:-http://localhost:3100}"
       ACQ_API_URL: "${ACQ_API_URL:-http://localhost:54421}"
+      ACQ_ANON_KEY: "${ACQ_ANON_KEY:-}"
       LEADINTEL_URL: "${LEADINTEL_URL:-http://localhost:3101}"
       LEADINTEL_API_URL: "${LEADINTEL_API_URL:-http://localhost:54422}"
+      LEADINTEL_ANON_KEY: "${LEADINTEL_ANON_KEY:-}"
+      # Phase C2 — shared platform-auth GoTrue (browser-facing URL)
+      PLATFORM_AUTH_URL: "${PLATFORM_AUTH_URL:-http://localhost:9998}"
+      # Hour 1: shared identity + entitlement DB (admin role — toggle access)
+      PLATFORM_DB_URL: "${PLATFORM_DB_URL:-}"
+      PLATFORM_ADMIN_DB_URL: "${PLATFORM_ADMIN_DB_URL:-}"
+    networks:
+      - default
+      - platform-shared
+
+networks:
+  platform-shared:
+    name: platform-shared
+    external: true

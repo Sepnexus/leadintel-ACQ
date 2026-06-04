@@ -1,6 +1,7 @@
 // redeploy: 2026-04-30 (force pickup of _shared/billing.ts changes)
 import { requireUser, createAdminClient, TenantContextError } from "../_shared/tenantContext.ts";
 import { meteredAiCall, estimateCostCents } from "../_shared/billing.ts";
+import { requireAccessOrDeny } from "../_shared/platform.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,6 +12,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
+
+  // ── Platform gate ──
+  const deny = await requireAccessOrDeny(req, "lead_intel", corsHeaders);
+  if (deny) return deny;
 
   try {
     let userId: string | null = null;

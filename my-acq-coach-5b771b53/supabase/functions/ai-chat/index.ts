@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { requireAccessOrDeny } from "../_shared/platform.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -54,6 +55,10 @@ function toAnthropicFormat(data: any) {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // ── Platform gate: must be authenticated + have acq_coach access ──
+  const deny = await requireAccessOrDeny(req, "acq_coach", corsHeaders);
+  if (deny) return deny;
 
   try {
     const { system, messages, max_tokens } = await req.json();

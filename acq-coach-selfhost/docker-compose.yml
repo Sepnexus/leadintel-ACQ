@@ -29,6 +29,7 @@ services:
       - acq_coach_pgdata:/var/lib/postgresql/data
     networks:
       - acq-net
+      - platform-shared
 
   acq-edge:
     image: supabase/edge-runtime:v1.58.4
@@ -60,8 +61,11 @@ services:
       CRON_SECRET:              "${CRON_SECRET:-}"
       RESEND_API_KEY:           "${RESEND_API_KEY:-}"
       DIGEST_FROM_EMAIL:        "${DIGEST_FROM_EMAIL:-digest@acqcoach.com}"
+      # Hour 1: shared identity + entitlement DB
+      PLATFORM_DB_URL:          "${PLATFORM_DB_URL:-}"
     networks:
       - acq-net
+      - platform-shared
 
 volumes:
   acq_coach_pgdata:
@@ -69,3 +73,6 @@ volumes:
 networks:
   acq-net:
     driver: bridge
+  platform-shared:
+    name: platform-shared
+    external: true

@@ -1,0 +1,42 @@
+# Platform DB — shared identity + entitlement DB.
+# Postgres 17 (matches Lovable dump format; we use this version intentionally).
+# Lives on the `platform-shared` external network so ACQ + Lead Intel + the
+# launcher can all reach it without exposing it publicly.
+
+services:
+  platform-db:
+    image: postgres:17
+    container_name: platform-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: platform
+      # Read by the init/00-roles.sh script on first boot
+      PLATFORM_APP_PASSWORD: ${PLATFORM_APP_PASSWORD}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD}
+      # Postgres tunings — keep simple for local
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - platform_pgdata:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # Host-bind on 54432 so we can `psql` from the laptop without going
+      # through `docker exec`. Container-internal port stays 5432 for the
+      # other services on the bridge network.
+      - "${HOST_PORT:-54432}:5432"
+    networks:
+      - platform-shared
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  platform_pgdata:
+
+networks:
+  platform-shared:
+    name: platform-shared
+    external: true

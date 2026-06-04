@@ -11,35 +11,6 @@ export default defineConfig(({ mode }) => ({
     hmr: {
       overlay: false,
     },
-    proxy: {
-      // Forward all Supabase API paths to the local Docker backend
-      "/functions/v1": {
-        target: "http://localhost:54421",
-        changeOrigin: true,
-        secure: false,
-      },
-      "/rest/v1": {
-        target: "http://localhost:54421",
-        changeOrigin: true,
-        secure: false,
-      },
-      "/auth/v1": {
-        target: "http://localhost:54421",
-        changeOrigin: true,
-        secure: false,
-      },
-      "/storage/v1": {
-        target: "http://localhost:54421",
-        changeOrigin: true,
-        secure: false,
-      },
-      "/realtime/v1": {
-        target: "http://localhost:54421",
-        changeOrigin: true,
-        secure: false,
-        ws: true,
-      },
-    },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {

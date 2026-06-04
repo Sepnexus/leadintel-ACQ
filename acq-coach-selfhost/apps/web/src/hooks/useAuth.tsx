@@ -24,10 +24,25 @@ type Ctx = {
 
 const AuthCtx = createContext<Ctx>({ session: null, loading: true, who: null, refreshWho: async () => {}, signOut: async () => {} });
 
+// ─── DEV BYPASS ───────────────────────────────────────────────────────────────
+// Set VITE_DEV_BYPASS_AUTH=true in .env.local to skip login and preview the app
+// as a mock super-admin. Never set this in production.
+const DEV_BYPASS = import.meta.env.VITE_DEV_BYPASS_AUTH === "true";
+const MOCK_SESSION = DEV_BYPASS ? { access_token: "dev-bypass", user: { id: "dev-user", email: "dev@local" } } : null;
+const MOCK_WHO: WhoAmI = {
+  user: { id: "dev-user", email: "dev@local" },
+  is_super_admin: true,
+  admin_account_ids: [],
+  rep_account_ids: [],
+  rep_ghl_user_ids: [],
+  accounts: [],
+};
+// ──────────────────────────────────────────────────────────────────────────────
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<any | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [who, setWho] = useState<WhoAmI | null>(null);
+  const [session, setSession] = useState<any | null>(DEV_BYPASS ? MOCK_SESSION : null);
+  const [loading, setLoading] = useState(!DEV_BYPASS);
+  const [who, setWho] = useState<WhoAmI | null>(DEV_BYPASS ? MOCK_WHO : null);
 
   const fetchWho = useCallback(async (token: string) => {
     try {
@@ -45,6 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (DEV_BYPASS) return; // skip real auth when bypass is active
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
       if (s?.access_token) {
@@ -69,11 +85,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     localStorage.clear();
     setWho(null);
-    // Enter the cross-app logout chain at its head (this app, ACQ Coach):
-    // ?logout=true → clears ACQ → Lead Intel?logout → clears LI → launcher (8080).
-    // This guarantees logout always ends at the platform launcher, never ACQ's
-    // own /login screen.
-    window.location.href = `${window.location.origin}/?logout=true`;
   }, []);
 
   return <AuthCtx.Provider value={{ session, loading, who, refreshWho, signOut }}>{children}</AuthCtx.Provider>;

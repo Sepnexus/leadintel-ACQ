@@ -49,51 +49,6 @@
 
     --radius: 0.5rem;
   }
-
-  /* Light theme — activated when JS removes the dark CSS vars override */
-  :root.light,
-  .light {
-    --background: 93 5% 97%;
-    --foreground: 120 26% 14%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 120 26% 14%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 120 26% 14%;
-
-    --primary: 107 31% 37%;
-    --primary-foreground: 0 0% 100%;
-    --primary-light: 107 31% 43%;
-    --primary-dark: 107 31% 30%;
-
-    --secondary: 120 5% 95%;
-    --secondary-foreground: 120 26% 14%;
-
-    --muted: 120 7% 90%;
-    --muted-foreground: 120 12% 40%;
-
-    --accent: 120 5% 92%;
-    --accent-foreground: 120 26% 14%;
-
-    --destructive: 0 67% 47%;
-    --destructive-foreground: 0 0% 100%;
-
-    --warning: 20 96% 45%;
-    --info: 213 90% 45%;
-    --purple: 258 70% 55%;
-
-    --surface-1: 0 0% 100%;
-    --surface-2: 120 5% 95%;
-    --surface-3: 120 7% 90%;
-
-    --border: 120 10% 85%;
-    --border-strong: 120 10% 78%;
-    --border-muted: 120 8% 82%;
-
-    --input: 120 10% 85%;
-    --ring: 107 31% 37%;
-  }
 }
 
 @layer base {

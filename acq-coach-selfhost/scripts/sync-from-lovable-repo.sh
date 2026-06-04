@@ -66,6 +66,8 @@ Deno.serve(async (req: Request) => {
       servicePath,
       memoryLimitMb: 256,
       workerTimeoutMs: 5 * 60 * 1000,
+      cpuTimeSoftLimitMs: 10_000,
+      cpuTimeHardLimitMs: 30_000,
       noModuleCache: false,
       importMapPath: null,
       envVars,

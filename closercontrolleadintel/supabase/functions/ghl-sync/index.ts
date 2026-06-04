@@ -1304,6 +1304,23 @@ Deno.serve(async (req) => {
       actorEmail = prof?.email ?? null;
     }
 
+    // ── Platform entitlement: is the tenant org enabled for lead_intel? ──
+    {
+      const { leadintelTenantHasAccess } = await import("../_shared/platform.ts");
+      const tenantHasAccess = await leadintelTenantHasAccess(resolvedTenantId, "lead_intel");
+      if (!tenantHasAccess) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error: "access_denied",
+            message: "This tenant does not have Lead Intel enabled. Contact your admin.",
+            tenant_id: resolvedTenantId,
+          }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+    }
+
     const creds = await getTenantGhlCreds(admin, resolvedTenantId);
     if (!creds) {
       return new Response(

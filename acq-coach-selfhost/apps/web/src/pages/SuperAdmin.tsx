@@ -19,7 +19,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Building2, Users, Wallet, TrendingUp, Activity, LogOut, Plus, Search, RefreshCw,
   Play, KeyRound, Pencil, ExternalLink, Settings as SettingsIcon, Eye, Zap,
-  Sun, Moon,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -42,19 +41,6 @@ const SECTIONS: { id: Section; label: string; icon: any }[] = [
 export default function SuperAdmin({ onImpersonate }: { onImpersonate?: (id: string) => void }) {
   const { who, signOut } = useAuth();
   const [section, setSection] = useState<Section>("customers");
-  const [theme, setTheme] = useState<string>(() => {
-    try { return localStorage.getItem("acqcoach_theme") || "dark"; } catch { return "dark"; }
-  });
-  useEffect(() => {
-    document.documentElement.classList.toggle("cc-theme-light", theme === "light");
-  }, [theme]);
-  function toggleTheme() {
-    setTheme(prev => {
-      const next = prev === "dark" ? "light" : "dark";
-      try { localStorage.setItem("acqcoach_theme", next); } catch { /* noop */ }
-      return next;
-    });
-  }
 
   return (
     <div className="cc-admin">
@@ -99,17 +85,12 @@ export default function SuperAdmin({ onImpersonate }: { onImpersonate?: (id: str
             <div className="font-display text-sm uppercase tracking-wider text-muted-foreground">
               {SECTIONS.find(s => s.id === section)?.label}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="ml-auto h-8 w-8 text-muted-foreground"
-              onClick={toggleTheme}
-              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            >
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </Button>
           </header>
           <div className="p-4 sm:p-6 max-w-[1600px] mx-auto">
+            {/* Phase C3 — point super_admins to the unified Platform Admin.
+                These ACQ-local admin tabs still work for impersonation + read,
+                but customer/user/billing CRUD lives in Platform Admin. */}
+            <PlatformAdminBanner section={section} />
             {section === "customers" && <CustomersTab onImpersonate={onImpersonate} />}
             {section === "users" && <UsersTab />}
             {section === "billing" && <BillingTab />}
@@ -118,6 +99,52 @@ export default function SuperAdmin({ onImpersonate }: { onImpersonate?: (id: str
           </div>
         </SidebarInset>
       </SidebarProvider>
+    </div>
+  );
+}
+
+// ─── Phase C3 — Platform Admin redirect banner ──────────────────────────────
+// Shown on every SuperAdmin tab. Customer/user/billing CRUD now lives in
+// Platform Admin (the unified launcher at /). These local tabs stay for
+// impersonation + read access during the migration window.
+function PlatformAdminBanner({ section }: { section: Section }) {
+  const launcherUrl = (() => {
+    if (typeof window === "undefined") return "http://localhost:8080/#/admin";
+    // Prod: launcher lives on a separate subdomain (configured via env).
+    // Local + most deploys: same-origin path or :8080.
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    return isLocal ? "http://localhost:8080/#/admin" : "/#/admin";
+  })();
+
+  const tabHint: Record<Section, string> = {
+    customers: "Customers · GHL credentials · trial settings",
+    users:     "User access (per-customer, per-product)",
+    billing:   "Wallet · auto-recharge · Stripe customers",
+    costs:     "Provider cost tracking",
+    system:    "Master keys · sync status",
+  };
+
+  return (
+    <div className="mb-4 rounded-lg border border-yellow-700/40 bg-yellow-950/20 p-3 text-sm">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-start gap-2 min-w-0">
+          <span className="mt-0.5 inline-block rounded bg-yellow-700/30 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-yellow-200">Moved</span>
+          <div className="min-w-0">
+            <div className="text-yellow-100">
+              <strong>{tabHint[section]}</strong> is now managed in <strong>Platform Admin</strong>.
+            </div>
+            <div className="text-[12px] text-yellow-200/70 mt-1">
+              This ACQ-local view is read-only during the transition. Make changes in Platform Admin so they apply to both products.
+            </div>
+          </div>
+        </div>
+        <a
+          href={launcherUrl}
+          className="shrink-0 rounded border border-yellow-600/50 bg-yellow-700/20 px-3 py-1.5 text-[12px] font-medium text-yellow-100 hover:bg-yellow-700/40 transition-colors no-underline"
+        >
+          Open Platform Admin →
+        </a>
+      </div>
     </div>
   );
 }

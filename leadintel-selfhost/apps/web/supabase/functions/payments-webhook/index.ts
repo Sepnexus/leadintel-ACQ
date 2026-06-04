@@ -69,6 +69,25 @@ Deno.serve(async (req) => {
               payment_intent: session.payment_intent,
             },
           });
+
+          // Phase B5 — cross-product audit log entry
+          try {
+            const { logAudit } = await import("../_shared/platform.ts");
+            await logAudit({
+              actorPlatformUserId: null,
+              product: "lead_intel",
+              action: "topup_succeeded",
+              metadata: {
+                leadintel_tenant_id: tenantId,
+                amount_cents: amountCents,
+                stripe_session_id: session.id,
+                stripe_customer_id: session.customer,
+                env,
+              },
+            });
+          } catch (auditErr) {
+            console.error("[payments-webhook] platform.audit_log write failed:", auditErr);
+          }
         }
 
         // Save customer + payment method for auto-recharge

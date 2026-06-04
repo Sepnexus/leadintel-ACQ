@@ -1,12 +1,16 @@
 // Auth layer for the unified launcher.
 //
-// Because ACQ Coach (:54421) and Lead Intel (:54422) are TWO independent
-// Supabase/GoTrue backends with DIFFERENT JWT secrets, a single token cannot
-// authenticate both. Instead the launcher logs into BOTH backends with the same
-// email+password (dual login), stores each token, and hands each app ITS OWN
-// token via a URL fragment on "Open App" (token handoff). Cross-origin
-// localStorage cannot be shared (different ports = different origins), which is
-// why the fragment-handoff approach is required.
+// Phase C2 (post-identity-merger):
+// The launcher logs into ONE backend — platform-auth (:9998), the shared
+// GoTrue against platform-db. The resulting JWT is signed with a secret
+// shared by ACQ + LI + platform-auth, so the same token validates against
+// all three. The launcher stores that single token in both the `acq` and
+// `leadintel` session slots for back-compat with existing code (AppSwitcher,
+// token handoff via URL fragment to app frontends, etc.).
+//
+// Fallback: if platform-auth is unreachable, we fall through to legacy
+// dual-login against each app's own GoTrue. That preserves Thursday-launch
+// safety — a platform-auth outage shouldn't block customers from logging in.
 
 import type { LauncherConfig } from "./config";
 
@@ -69,6 +73,45 @@ export type DualLoginResult = {
   errors: Record<ProductKey, string | null>;
 };
 
+// Single platform-auth login. No anon key needed — GoTrue's /token endpoint
+// is open by design (it's the login surface).
+async function platformPasswordGrant(
+  apiUrl: string,
+  email: string,
+  password: string
+): Promise<Session> {
+  const r = await fetch(`${apiUrl}/token?grant_type=password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.access_token) {
+    throw new Error(d.error_description || d.msg || d.error || `auth failed (${r.status})`);
+  }
+  return d as Session;
+}
+
+// Phase C2 — after platform-auth issues a JWT, mirror the auth.sessions row
+// into each app's local auth.sessions table so the app's GoTrue accepts
+// the session_id claim. Without this, /auth/v1/user returns 403 after handoff.
+// Non-fatal: if it fails, app SDK can still use the access_token as a bearer
+// for PostgREST + edge fns (session_id check only fires on getUser/refresh).
+async function mirrorPlatformSession(accessToken: string): Promise<void> {
+  try {
+    const r = await fetch("/admin-api/sso/mirror-session", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      console.warn("[launcher] mirror-session non-ok:", r.status, d);
+    }
+  } catch (e) {
+    console.warn("[launcher] mirror-session failed:", (e as Error).message);
+  }
+}
+
 export async function dualLogin(
   cfg: LauncherConfig,
   email: string,
@@ -76,6 +119,27 @@ export async function dualLogin(
 ): Promise<DualLoginResult> {
   clearSessions(); // wipe any previous user's sessions before starting a new login
   const res: DualLoginResult = { acq: null, leadintel: null, errors: { acq: null, leadintel: null } };
+
+  // Phase C2 path — single login against platform-auth. Same JWT_SECRET is
+  // shared with ACQ + LI, so this one token validates against all backends.
+  try {
+    const session = await platformPasswordGrant(cfg.platformAuthUrl, email, password);
+    // Mirror the auth.sessions row into both apps so GoTrue accepts the
+    // session_id claim when the user opens an app. Non-fatal — fires-and-forgets
+    // but typically completes in <100ms.
+    await mirrorPlatformSession(session.access_token);
+    // Store under both legacy keys so AppSwitcher / token-handoff keep working.
+    res.acq = session;
+    res.leadintel = session;
+    saveSession("acq", session);
+    saveSession("leadintel", session);
+    return res;
+  } catch (platformErr) {
+    // Fallback to legacy dual-login if platform-auth is unreachable / down.
+    // Logged so we can spot it in browser console; not surfaced to the user.
+    console.warn("[launcher] platform-auth login failed, falling back to dual:", (platformErr as Error).message);
+  }
+
   const [acqR, liR] = await Promise.allSettled([
     passwordGrant(cfg.acqApiUrl, cfg.acqAnonKey, email, password),
     passwordGrant(cfg.leadintelApiUrl, cfg.leadintelAnonKey, email, password),
@@ -184,19 +248,10 @@ export function getProductSessions(): Record<ProductKey, Session | null> {
   return { acq: getSession("acq"), leadintel: getSession("leadintel") };
 }
 
-// ── Per-user product access (enable/disable), stored in localStorage ──────────
-export type Access = { acq: boolean; leadintel: boolean };
-
-export function getAccess(userId: string): Access {
-  try {
-    const v = localStorage.getItem(`cc_product_access_${userId}`);
-    if (v) return { acq: true, leadintel: true, ...JSON.parse(v) };
-  } catch { /* noop */ }
-  return { acq: true, leadintel: true };
-}
-export function setAccess(userId: string, a: Access) {
-  localStorage.setItem(`cc_product_access_${userId}`, JSON.stringify(a));
-}
+// Per-user "Manage Access" localStorage layer was removed. Access derives
+// from customer membership on the server side (see platform.user_has_access
+// in platform-db). The launcher's dashboard simply renders whatever sessions
+// the backend granted.
 
 export function currentUserId(): string {
   return getSession("leadintel")?.user?.id || getSession("acq")?.user?.id || "anon";
@@ -246,63 +301,43 @@ export async function changePasswordBothBackends(
   const email = currentEmail();
   if (!email) return { ok: false, error: "Not signed in." };
 
-  // Determine which backends this user is signed into — only operate on those.
-  const hasAcq = !!getSession("acq");
-  const hasLi  = !!getSession("leadintel");
-  if (!hasAcq && !hasLi) return { ok: false, error: "Not signed in to any product." };
-
-  // Step 1 — verify current password on all active backends and get fresh tokens.
-  const acqVerify = hasAcq
-    ? await passwordGrant(cfg.acqApiUrl, cfg.acqAnonKey, email, currentPassword).catch(e => e as Error)
-    : null;
-  const liVerify = hasLi
-    ? await passwordGrant(cfg.leadintelApiUrl, cfg.leadintelAnonKey, email, currentPassword).catch(e => e as Error)
-    : null;
-
-  if (acqVerify instanceof Error) {
-    return { ok: false, error: `Current password incorrect on ACQ Coach: ${acqVerify.message}` };
-  }
-  if (liVerify instanceof Error) {
-    return { ok: false, error: `Current password incorrect on Lead Intel: ${liVerify.message}` };
+  // Phase C2 — verify current password against platform-auth (canonical).
+  let platformToken: string;
+  try {
+    const s = await platformPasswordGrant(cfg.platformAuthUrl, email, currentPassword);
+    platformToken = s.access_token;
+  } catch (e: any) {
+    return { ok: false, error: `Current password incorrect: ${e.message}` };
   }
 
-  const acqToken = acqVerify?.access_token ?? null;
-  const liToken  = liVerify?.access_token  ?? null;
-
-  // Step 2 — update ACQ Coach (if signed in).
-  if (acqToken) {
-    try {
-      await updateGoTruePassword(cfg.acqApiUrl, cfg.acqAnonKey, acqToken, newPassword);
-    } catch (e: any) {
-      return { ok: false, error: `ACQ Coach update failed: ${e.message}` };
-    }
-  }
-
-  // Step 3 — update Lead Intel; roll back ACQ on failure.
-  if (liToken) {
-    try {
-      await updateGoTruePassword(cfg.leadintelApiUrl, cfg.leadintelAnonKey, liToken, newPassword);
-    } catch (liErr: any) {
-      // Rollback ACQ if we updated it (token still valid for a short window).
-      if (acqToken) {
-        try {
-          await updateGoTruePassword(cfg.acqApiUrl, cfg.acqAnonKey, acqToken, currentPassword);
-        } catch {
-          return {
-            ok: false,
-            error:
-              "Lead Intel update failed AND the ACQ Coach rollback also failed — both backends may now have different passwords. Update them manually (see README).",
-          };
-        }
+  // Update password on platform-auth (canonical store).
+  try {
+    await fetch(`${cfg.platformAuthUrl}/user`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${platformToken}` },
+      body: JSON.stringify({ password: newPassword }),
+    }).then(async r => {
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.error_description || d.msg || `password update failed (${r.status})`);
       }
-      return {
-        ok: false,
-        error: `Lead Intel update failed (ACQ Coach was successfully rolled back): ${liErr.message}`,
-      };
-    }
+    });
+  } catch (e: any) {
+    return { ok: false, error: `Password update failed: ${e.message}` };
   }
 
-  // Step 4 — refresh stored sessions with the new password (non-fatal).
+  // Mirror to ACQ + LI's own GoTrues so app-direct logins (rare, but possible)
+  // still accept the new password. Non-fatal — platform-auth is authoritative.
+  await Promise.allSettled([
+    passwordGrant(cfg.acqApiUrl, cfg.acqAnonKey, email, currentPassword)
+      .then(s => updateGoTruePassword(cfg.acqApiUrl, cfg.acqAnonKey, s.access_token, newPassword))
+      .catch(e => console.warn("[launcher] ACQ mirror pw failed:", e?.message)),
+    passwordGrant(cfg.leadintelApiUrl, cfg.leadintelAnonKey, email, currentPassword)
+      .then(s => updateGoTruePassword(cfg.leadintelApiUrl, cfg.leadintelAnonKey, s.access_token, newPassword))
+      .catch(e => console.warn("[launcher] LI mirror pw failed:", e?.message)),
+  ]);
+
+  // Refresh stored session with new password (non-fatal).
   try { await dualLogin(cfg, email, newPassword); } catch { /* JWT still valid */ }
 
   return { ok: true };

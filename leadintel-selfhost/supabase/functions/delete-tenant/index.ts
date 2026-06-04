@@ -20,13 +20,12 @@ type DeleteStep = {
   table: string;
   batch: boolean;
   batchSize?: number;
-  orderCol?: string;
 };
 
 const DELETE_STEPS: DeleteStep[] = [
-  { table: "ghl_messages",      batch: true, batchSize: 1000, orderCol: "ghl_message_id" },
-  { table: "ghl_contact_notes", batch: true, batchSize: 1000, orderCol: "ghl_note_id" },
-  { table: "ghl_contact_tags",  batch: true, batchSize: 1000, orderCol: "ghl_contact_id" },
+  { table: "ghl_messages", batch: true, batchSize: 1000 },
+  { table: "ghl_contact_notes", batch: true, batchSize: 1000 },
+  { table: "ghl_contact_tags", batch: true, batchSize: 1000 },
   { table: "ghl_conversations", batch: false },
   { table: "ghl_opportunities", batch: false },
   { table: "ghl_contacts", batch: false },
@@ -58,7 +57,7 @@ async function deleteTenantRows(admin: ReturnType<typeof createAdminClient>, ten
         .delete({ count: "exact" })
         .eq("tenant_id", tenantId);
       const { count, error } = step.batch
-        ? await query.order(step.orderCol as never).limit(step.batchSize ?? 1000)
+        ? await query.limit(step.batchSize ?? 1000)
         : await query;
 
       if (error) {

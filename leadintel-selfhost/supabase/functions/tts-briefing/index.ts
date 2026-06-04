@@ -14,6 +14,11 @@ const DEEPGRAM_API_KEY = Deno.env.get("DEEPGRAM_API_KEY") ?? "";
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  // ── Platform gate ──
+  const { requireAccessOrDeny } = await import("../_shared/platform.ts");
+  const deny = await requireAccessOrDeny(req, "lead_intel", corsHeaders);
+  if (deny) return deny;
+
   try {
     let userId: string | null = null;
     try {

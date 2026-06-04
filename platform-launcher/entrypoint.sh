@@ -5,8 +5,8 @@
 
 set -e
 
-ACQ_ANON_DEFAULT="eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJyb2xlIjogImFub24iLCAiaXNzIjogInN1cGFiYXNlIiwgImlhdCI6IDE3MDAwMDAwMDAsICJleHAiOiAxOTAwMDAwMDAwfQ.kaRTfjiO7xjshwoi_MBwNZFF-vX2vy-yC_vqagDRvys"
-LI_ANON_DEFAULT="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzc5OTE0NTgwLCJleHAiOjIwOTUyNzQ1ODB9.UkqBCF2fE78tsbl4QAhhoqBktG2lSChZTBFEjYHfZjA"
+ACQ_ANON_DEFAULT="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgwNTY0MjY0LCJleHAiOjIwOTU5MjQyNjR9.2JNzR8MSPlGfatGmfUp1tQ1bLiDEQBK9mhLmsbHmR88"
+LI_ANON_DEFAULT="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzgwNTY0MjY0LCJleHAiOjIwOTU5MjQyNjR9.2JNzR8MSPlGfatGmfUp1tQ1bLiDEQBK9mhLmsbHmR88"
 
 cat > /usr/share/nginx/html/config.json <<EOF
 {
@@ -15,7 +15,8 @@ cat > /usr/share/nginx/html/config.json <<EOF
   "acqAnonKey":      "${ACQ_ANON_KEY:-$ACQ_ANON_DEFAULT}",
   "leadintelUrl":    "${LEADINTEL_URL:-http://localhost:3101}",
   "leadintelApiUrl": "${LEADINTEL_API_URL:-http://localhost:54422}",
-  "leadintelAnonKey":"${LEADINTEL_ANON_KEY:-$LI_ANON_DEFAULT}"
+  "leadintelAnonKey":"${LEADINTEL_ANON_KEY:-$LI_ANON_DEFAULT}",
+  "platformAuthUrl": "${PLATFORM_AUTH_URL:-http://localhost:9998}"
 }
 EOF
 

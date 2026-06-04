@@ -72,7 +72,58 @@ export function AdminLayout({ children }: { children: ReactNode }) {
         </div>
         <UserMenu />
       </header>
-      <main style={{ padding: "20px" }}>{children}</main>
+      <main style={{ padding: "20px" }}>
+        <PlatformAdminBanner />
+        {children}
+      </main>
+    </div>
+  );
+}
+
+// ─── Phase C3 — Platform Admin redirect banner ──────────────────────────────
+// Customer / billing / audit CRUD lives in Platform Admin now. These LI-local
+// tabs stay as read-only during the migration window.
+function PlatformAdminBanner() {
+  const launcherUrl = (() => {
+    if (typeof window === "undefined") return "http://localhost:8080/#/admin";
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    return isLocal ? "http://localhost:8080/#/admin" : "/#/admin";
+  })();
+  return (
+    <div style={{
+      marginBottom: 16, padding: "12px 14px", borderRadius: 8,
+      border: "1px solid " + COLORS.B2 + "80",
+      background: "rgba(180,120,20,0.08)",
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      gap: 12, flexWrap: "wrap", fontSize: 13,
+    }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", minWidth: 0 }}>
+        <span style={{
+          background: "rgba(220,160,40,0.25)", color: "#f5d68a",
+          padding: "2px 8px", borderRadius: 4, fontSize: 10,
+          fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase",
+          flexShrink: 0, marginTop: 1,
+        }}>Moved</span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ color: "#f1dca7" }}>
+            <strong>Tenants · billing · audit · invites</strong> are now managed in <strong>Platform Admin</strong>.
+          </div>
+          <div style={{ color: "#cfb985", fontSize: 11, marginTop: 4 }}>
+            This Lead Intel view is read-only during the transition. Make changes in Platform Admin so they apply to both products.
+          </div>
+        </div>
+      </div>
+      <a
+        href={launcherUrl}
+        style={{
+          flexShrink: 0, border: "1px solid #b8902a80",
+          background: "rgba(220,160,40,0.18)",
+          padding: "6px 12px", borderRadius: 6, fontSize: 12,
+          color: "#f5d68a", textDecoration: "none", fontWeight: 500,
+        }}
+      >
+        Open Platform Admin →
+      </a>
     </div>
   );
 }

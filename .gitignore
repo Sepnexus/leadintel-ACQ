@@ -44,3 +44,6 @@ closercontrolleadintel/.git-lovable-origin/
 *.bak
 *.tmp
 .tmp/
+
+# Claude Preview dev artifacts
+.claude/

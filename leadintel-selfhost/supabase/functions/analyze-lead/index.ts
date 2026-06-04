@@ -271,6 +271,11 @@ function validShape(o: any): boolean {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
+  // ── Platform gate ──
+  const { requireAccessOrDeny } = await import("../_shared/platform.ts");
+  const deny = await requireAccessOrDeny(req, "lead_intel", corsHeaders);
+  if (deny) return deny;
+
   try {
     const body = await req.json();
     const { contact_id, force } = body;

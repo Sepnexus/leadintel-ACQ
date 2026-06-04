@@ -9,6 +9,9 @@ SHELL := /usr/bin/env bash
 LAUNCHER  := platform-launcher
 ACQ       := acq-coach-selfhost
 LEADINTEL := leadintel-selfhost
+PLATFORM_DB     := platform-db
+PLATFORM_AUTH   := platform-auth
+PLATFORM_ADMIN  := platform-admin-api
 
 help:  ## Show this help
 	@awk 'BEGIN{FS=":.*##"} /^[a-zA-Z_-]+:.*##/{printf "  \033[36m%-22s\033[0m %s\n",$$1,$$2}' $(MAKEFILE_LIST)
@@ -39,24 +42,36 @@ build:  ## Build all 3 stacks (launcher + acq + leadintel)
 	cd $(ACQ)       && docker compose build
 	cd $(LEADINTEL) && docker compose build
 
-up:  ## Start all 3 stacks (assumes images already built)
-	cd $(LAUNCHER)  && docker compose up -d
-	cd $(ACQ)       && docker compose up -d
-	cd $(LEADINTEL) && docker compose up -d
+up:  ## Start the FULL platform (db, auth, admin-api, launcher, ACQ, LI)
+	cd $(PLATFORM_DB)    && docker compose up -d
+	cd $(PLATFORM_AUTH)  && docker compose up -d
+	cd $(PLATFORM_ADMIN) && docker compose up -d
+	cd $(LAUNCHER)       && docker compose up -d
+	cd $(ACQ)            && docker compose up -d
+	cd $(LEADINTEL)      && docker compose up -d
 	@echo ""
-	@echo "  Launcher:   http://localhost:8080"
-	@echo "  ACQ:        http://localhost:3100   API: http://localhost:54421"
-	@echo "  Lead Intel: http://localhost:3101   API: http://localhost:54422"
+	@echo "  Launcher:       http://localhost:8080"
+	@echo "  Platform Auth:  http://localhost:9998   (shared GoTrue)"
+	@echo "  Platform DB:    localhost:54432"
+	@echo "  Admin API:      http://localhost:8080/admin-api"
+	@echo "  ACQ:            http://localhost:3100   API: http://localhost:54421"
+	@echo "  Lead Intel:     http://localhost:3101   API: http://localhost:54422"
 
-down:  ## Stop all 3 stacks (KEEP volumes)
-	-cd $(LAUNCHER)  && docker compose down
-	-cd $(ACQ)       && docker compose down
-	-cd $(LEADINTEL) && docker compose down
+down:  ## Stop everything (KEEP volumes)
+	-cd $(LAUNCHER)       && docker compose down
+	-cd $(ACQ)            && docker compose down
+	-cd $(LEADINTEL)      && docker compose down
+	-cd $(PLATFORM_ADMIN) && docker compose down
+	-cd $(PLATFORM_AUTH)  && docker compose down
+	-cd $(PLATFORM_DB)    && docker compose down
 
 nuke:  ## Stop + remove containers AND volumes (DESTROYS local DBs)
-	-cd $(LAUNCHER)  && docker compose down -v
-	-cd $(ACQ)       && docker compose down -v
-	-cd $(LEADINTEL) && docker compose down -v
+	-cd $(LAUNCHER)       && docker compose down -v
+	-cd $(ACQ)            && docker compose down -v
+	-cd $(LEADINTEL)      && docker compose down -v
+	-cd $(PLATFORM_ADMIN) && docker compose down -v
+	-cd $(PLATFORM_AUTH)  && docker compose down -v
+	-cd $(PLATFORM_DB)    && docker compose down -v
 
 restart: down up  ## Restart everything
 
@@ -97,12 +112,16 @@ psql-leadintel:      ## psql into the Lead Intel database
 
 # ---------- verification quick checks ----------
 
-verify:  ## Run smoke checks against all 3 stacks (after `make up`)
-	@echo "[verify] launcher  → http://localhost:8080/health"
+verify:  ## Run smoke checks against the full platform (after `make up`)
+	@echo "[verify] launcher       → http://localhost:8080/health"
 	@curl -fsS http://localhost:8080/health || echo " (FAIL)"
-	@echo "[verify] acq API    → http://localhost:54421/health"
+	@echo "[verify] platform auth  → http://localhost:9998/health"
+	@curl -fsS http://localhost:9998/health || echo " (FAIL)"
+	@echo "[verify] admin-api      → http://localhost:8080/admin-api/_health"
+	@curl -fsS http://localhost:8080/admin-api/_health || echo " (FAIL)"
+	@echo "[verify] acq API        → http://localhost:54421/health"
 	@curl -fsS http://localhost:54421/health || echo " (FAIL)"
-	@echo "[verify] acq auth   → http://localhost:54421/auth/v1/health"
+	@echo "[verify] acq auth       → http://localhost:54421/auth/v1/health"
 	@curl -fsS http://localhost:54421/auth/v1/health || echo " (FAIL)"
 	@echo "[verify] leadintel API  → http://localhost:54422/health"
 	@curl -fsS http://localhost:54422/health || echo " (FAIL)"

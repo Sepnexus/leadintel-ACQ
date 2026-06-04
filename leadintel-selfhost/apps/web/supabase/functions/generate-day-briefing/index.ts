@@ -107,6 +107,11 @@ function ruleBased(leads: any[]): BriefingShape {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  // ── Platform gate ──
+  const { requireAccessOrDeny } = await import("../_shared/platform.ts");
+  const deny = await requireAccessOrDeny(req, "lead_intel", corsHeaders);
+  if (deny) return deny;
+
   try {
     const body = await req.json();
     const { lead_ids, rep_id, force } = body;

@@ -5,30 +5,15 @@ import {
   getSession,
   buildSsoLink,
   fetchAcqUserInfo,
-  getAccess,
-  setAccess,
   currentUserId,
   currentEmail,
-  type Access,
   type ProductKey,
   type UserInfo,
 } from "./auth";
 import { AccountSettings } from "./AccountSettings";
+import { WalletBanner } from "./WalletBanner";
 
 const FONT = "'Open Sans', system-ui, -apple-system, sans-serif";
-
-// ── Per-user per-product enable preference ─────────────────────────────────────
-// Stored as "cc_product_enabled_{email}_{key}" → "1" | "0"
-// Defaults to enabled (true) on first login.
-function getProductEnabled(email: string, key: ProductKey): boolean {
-  try {
-    const v = localStorage.getItem(`cc_product_enabled_${email}_${key}`);
-    return v === null ? true : v !== "0";
-  } catch { return true; }
-}
-function setProductEnabled(email: string, key: ProductKey, enabled: boolean) {
-  try { localStorage.setItem(`cc_product_enabled_${email}_${key}`, enabled ? "1" : "0"); } catch { /* noop */ }
-}
 
 // ── Role display helpers ───────────────────────────────────────────────────────
 
@@ -83,36 +68,38 @@ const ALL_PRODUCTS: Product[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function Dashboard({ cfg, onLogout }: { cfg: LauncherConfig; onLogout: () => void }) {
+export function Dashboard({ cfg, onLogout, onOpenAdmin }: { cfg: LauncherConfig; onLogout: () => void; onOpenAdmin?: () => void }) {
   const [theme, setTheme]               = useState(getInitialTheme());
   const [showSettings, setShowSettings] = useState(false);
   const [userInfo, setUserInfo]         = useState<UserInfo | null>(null);
   const [infoTimedOut, setInfoTimedOut] = useState(false);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+
+  // Quietly check whether this user is a platform admin (controls the Admin nav button).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/admin-api/me", {
+          headers: (() => {
+            const sess = getSession("acq") ?? getSession("leadintel");
+            return sess ? { Authorization: `Bearer ${sess.access_token}` } : {};
+          })(),
+        });
+        if (!cancelled) setIsPlatformAdmin(r.ok);
+      } catch { /* network error → no admin button */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const userId = currentUserId();
   const email  = currentEmail();
   const isSuperAdmin = userInfo?.role === "super_admin";
 
-  // Super-admin bulk-access state (existing system, unchanged)
-  const [access, setAccessState] = useState<Access>(() => getAccess(userId));
-
-  // Per-user per-product enabled state — loaded from localStorage, keyed to email
-  const [enabledMap, setEnabledMap] = useState<Record<ProductKey, boolean>>(() => ({
-    acq:       getProductEnabled(email, "acq"),
-    leadintel: getProductEnabled(email, "leadintel"),
-  }));
-
-  function toggleProduct(key: ProductKey) {
-    const next = !enabledMap[key];
-    setEnabledMap(prev => ({ ...prev, [key]: next }));
-    setProductEnabled(email, key, next);
-    // Super-admin also syncs the shared access state
-    if (isSuperAdmin) {
-      const nextAccess = { ...access, [key]: next };
-      setAccessState(nextAccess);
-      setAccess(userId, nextAccess);
-    }
-  }
+  // Per-user product toggles were removed. Access derives from customer
+  // membership (see platform.user_has_access in platform-db). The launcher
+  // simply shows what the backend allows.
+  void userId; void email; void isSuperAdmin;
 
   // Fetch role once on mount — fetchAcqUserInfo has a 5s internal timeout.
   useEffect(() => {
@@ -213,6 +200,13 @@ export function Dashboard({ cfg, onLogout }: { cfg: LauncherConfig; onLogout: ()
               )}
             </div>
           )}
+          {onOpenAdmin && isPlatformAdmin && (
+            <button onClick={onOpenAdmin} title="Platform Admin" style={{
+              background: "transparent", border: `1px solid ${COLORS.GREEN}`,
+              borderRadius: 8, padding: "6px 12px", color: COLORS.GREEN,
+              fontSize: 12, fontWeight: 600, cursor: "pointer", lineHeight: 1,
+            }}>⚡ Admin</button>
+          )}
           <button onClick={() => setShowSettings(true)} title="Account settings" style={{
             background: "transparent", border: `1px solid ${COLORS.B1}`,
             borderRadius: 8, padding: "6px 12px", color: COLORS.T2,
@@ -243,6 +237,7 @@ export function Dashboard({ cfg, onLogout }: { cfg: LauncherConfig; onLogout: ()
       </header>
 
       <main style={{ maxWidth: 760, margin: "0 auto", padding: "40px 24px 60px" }}>
+        <WalletBanner cfg={cfg} />
         <h1 style={{ fontSize: 22, fontWeight: 800, color: COLORS.TEXT, margin: "0 0 6px", letterSpacing: "0.02em" }}>
           {greeting(userInfo.firstName)}
         </h1>
@@ -261,10 +256,12 @@ export function Dashboard({ cfg, onLogout }: { cfg: LauncherConfig; onLogout: ()
           gap: 16,
         }}>
           {products.map(p => {
+            // Access derives from customer membership now (platform-db).
+            // If the user has a session for this product, the backend already
+            // entitled them — no separate per-user toggle.
             const session   = getSession(p.key);
-            const available = !!session;                       // login succeeded for this backend
-            const enabled   = available && enabledMap[p.key];  // user has it toggled on
-            const active    = available && enabled;            // → show Open App
+            const available = !!session;
+            const active    = available;
             const peerKey: ProductKey = p.key === "acq" ? "leadintel" : "acq";
             const link = session ? buildSsoLink(p.url, session, { [peerKey]: getSession(peerKey) }) : null;
 
@@ -305,48 +302,16 @@ export function Dashboard({ cfg, onLogout }: { cfg: LauncherConfig; onLogout: ()
                 </p>
 
                 {available ? (
-                  <>
-                    {/* Enable/disable toggle — only for products the user can access */}
-                    <label style={{
-                      display: "flex", alignItems: "center", gap: 9, marginTop: 16,
-                      cursor: "pointer", userSelect: "none",
+                  link && (
+                    <a href={link} style={{
+                      display: "block", textAlign: "center", marginTop: 16,
+                      background: p.accent, border: "none", color: "#fff",
+                      borderRadius: 8, padding: "11px",
+                      fontSize: 12.5, fontWeight: 700, textDecoration: "none", letterSpacing: "0.03em",
                     }}>
-                      <span
-                        onClick={() => toggleProduct(p.key)}
-                        style={{
-                          display: "inline-flex", alignItems: "center",
-                          width: 36, height: 20, borderRadius: 10,
-                          background: enabled ? COLORS.GREEN : COLORS.B3,
-                          position: "relative", transition: "background .2s",
-                          flexShrink: 0, cursor: "pointer",
-                        }}
-                      >
-                        <span style={{
-                          width: 14, height: 14, borderRadius: "50%", background: "#fff",
-                          position: "absolute", left: enabled ? 19 : 3,
-                          transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                        }} />
-                      </span>
-                      <span
-                        onClick={() => toggleProduct(p.key)}
-                        style={{ fontSize: 11.5, fontWeight: 600, color: enabled ? COLORS.GREEN : COLORS.RED }}
-                      >
-                        {enabled ? "Enabled" : "Disabled"}
-                      </span>
-                    </label>
-
-                    {/* Open App — only when enabled */}
-                    {enabled && link && (
-                      <a href={link} style={{
-                        display: "block", textAlign: "center", marginTop: 12,
-                        background: p.accent, border: "none", color: "#fff",
-                        borderRadius: 8, padding: "11px",
-                        fontSize: 12.5, fontWeight: 700, textDecoration: "none", letterSpacing: "0.03em",
-                      }}>
-                        Open App →
-                      </a>
-                    )}
-                  </>
+                      Open App →
+                    </a>
+                  )
                 ) : (
                   /* No session for this product — user has no access. */
                   <div style={{
@@ -365,41 +330,9 @@ export function Dashboard({ cfg, onLogout }: { cfg: LauncherConfig; onLogout: ()
           })}
         </div>
 
-        {/* Super-admin: Manage Access panel */}
-        {isSuperAdmin && (
-          <div style={{
-            marginTop: 32, background: COLORS.S1,
-            border: `1px solid ${COLORS.B1}`, borderRadius: 14, padding: 22,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <span style={{ fontSize: 13, fontWeight: 800, color: COLORS.TEXT, letterSpacing: "0.02em" }}>
-                Manage Access
-              </span>
-              <span style={{
-                fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em",
-                color: COLORS.GREEN, background: COLORS.GREEN + "1e", borderRadius: 5, padding: "2px 7px",
-              }}>Super Admin</span>
-            </div>
-            <p style={{ fontSize: 11.5, color: COLORS.T3, margin: "0 0 16px" }}>
-              Toggle which products are available on this account. Stored locally per account.
-            </p>
-            {ALL_PRODUCTS.map(p => (
-              <div key={p.key} style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "10px 0", borderTop: `1px solid ${COLORS.B1}`,
-              }}>
-                <div style={{ fontSize: 13, color: COLORS.TEXT, fontWeight: 600 }}>{p.name}</div>
-                <button onClick={() => toggleProduct(p.key)} style={{
-                  background: enabledMap[p.key] ? p.accent : "transparent",
-                  border: `1px solid ${enabledMap[p.key] ? p.accent : COLORS.B3}`,
-                  color: enabledMap[p.key] ? "#fff" : COLORS.T2,
-                  borderRadius: 999, padding: "5px 14px",
-                  fontSize: 11.5, fontWeight: 700, cursor: "pointer", minWidth: 86,
-                }}>{enabledMap[p.key] ? "Enabled" : "Disabled"}</button>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Phase: per-user "Manage Access" panel was removed. Access now
+            derives from customer membership — toggle on the Customer detail
+            page in Platform Admin instead. */}
       </main>
     </div>
   );

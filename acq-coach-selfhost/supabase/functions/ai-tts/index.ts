@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { requireAccessOrDeny } from "../_shared/platform.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,6 +10,11 @@ const allowedVoices = new Set(["alloy", "ash", "ballad", "coral", "echo", "fable
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // ── Platform gate: auth + acq_coach access ──
+  const deny = await requireAccessOrDeny(req, "acq_coach", corsHeaders);
+  if (deny) return deny;
+
   try {
     const { text, voice = "onyx" } = await req.json();
     const cleanText = String(text || "").trim();

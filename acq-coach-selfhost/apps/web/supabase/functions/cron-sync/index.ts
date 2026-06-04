@@ -7,6 +7,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { acqAccountHasAccess } from "../_shared/platform.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -783,6 +784,12 @@ serve(async (req) => {
 
     const results = [];
     for (const acc of (accounts || [])) {
+      // ── Platform entitlement: skip accounts whose org has acq_coach disabled ──
+      const hasAccess = await acqAccountHasAccess(acc.id, "acq_coach");
+      if (!hasAccess) {
+        results.push({ account_id: acc.id, name: acc.name, status: "skipped_no_access" });
+        continue;
+      }
       try { results.push(await syncTenant(admin, acc, trigger, trigger === "manual" ? backfillSeconds : undefined)); }
       catch (e) { results.push({ account_id: acc.id, name: acc.name, status: "error", error: errMsg(e) }); }
     }

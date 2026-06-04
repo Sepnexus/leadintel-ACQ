@@ -62,7 +62,7 @@ const Index = () => {
         {view === "team"
           ? <TeamPage accountId={impersonateAcc} onBack={() => setView("home")} />
           : view === "billing"
-          ? <Billing onBack={() => setView("home")} accountId={impersonateAcc} />
+          ? <Billing onBack={() => setView("home")} />
           : view === "rep-as"
           ? <RepView accountId={impersonateAcc} onBack={() => setView("home")} />
           : <ACQCoachWithTeamButton accountId={impersonateAcc} onTeam={() => setView("team")} onBilling={() => setView("billing")} onRepAs={() => setView("rep-as")} isSuperAdmin />}
@@ -129,27 +129,21 @@ function ACQCoachWithTeamButton({ accountId, onTeam, onBilling, onRepAs, onSignO
     e.currentTarget.style.color = on ? "#7eb56a" : "#d4d4d4";
   };
   return (
-    <div style={{ display: "flex", flexDirection: "column" }}>
-      {/* ── Context sub-row ────────────────────────────────────────────────────
-          In-flow row that sits directly above the ACQCoach header.
-          Removed position:fixed — that caused collisions with header controls
-          because the two elements were completely independent in the layout.
-          Now everything stacks naturally: banner (sticky) → sub-row → ACQCoach header.
-      ────────────────────────────────────────────────────────────────────────── */}
+    <div>
       <div style={{
-        height: 34,
-        background: "#060606",
-        borderBottom: "1px solid #1c1c1c",
-        display: "flex",
-        alignItems: "stretch",
-        justifyContent: "flex-end",
-        flexShrink: 0,
+        position: "fixed", top: 14, right: 120, zIndex: 100,
+        display: "flex", alignItems: "stretch",
+        background: "#0a0a0a",
+        border: "1px solid #1c1c1c",
+        borderRadius: 8,
+        overflow: "hidden",
+        boxShadow: "none",
       }}>
         {isDemoCustomer && onRepAs && (
           <>
             <button
               onClick={onRepAs}
-              style={{ ...itemBase, color: "#7eb56a", height: "100%" }}
+              style={{ ...itemBase, color: "#7eb56a" }}
               title="Open the rep-facing training UI (demo customer only)"
               onMouseEnter={e => onHover(e, true)}
               onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#7eb56a"; }}
@@ -161,19 +155,18 @@ function ACQCoachWithTeamButton({ accountId, onTeam, onBilling, onRepAs, onSignO
         )}
         {onBilling && (
           <>
-            <button onClick={onBilling} style={{ ...itemBase, height: "100%" }} onMouseEnter={e => onHover(e, true)} onMouseLeave={e => onHover(e, false)}>Billing</button>
+            <button onClick={onBilling} style={itemBase} onMouseEnter={e => onHover(e, true)} onMouseLeave={e => onHover(e, false)}>Billing</button>
             <div style={divider} />
           </>
         )}
-        <button onClick={onTeam} style={{ ...itemBase, height: "100%" }} onMouseEnter={e => onHover(e, true)} onMouseLeave={e => onHover(e, false)}>Team</button>
+        <button onClick={onTeam} style={itemBase} onMouseEnter={e => onHover(e, true)} onMouseLeave={e => onHover(e, false)}>Team</button>
         {!isSuperAdmin && onSignOut && (
           <>
             <div style={divider} />
-            <button onClick={onSignOut} style={{ ...itemBase, height: "100%" }} onMouseEnter={e => onHover(e, true)} onMouseLeave={e => onHover(e, false)}>Sign out</button>
+            <button onClick={onSignOut} style={itemBase} onMouseEnter={e => onHover(e, true)} onMouseLeave={e => onHover(e, false)}>Sign out</button>
           </>
         )}
       </div>
-
       <ACQCoach isSuperAdmin={isSuperAdmin} />
     </div>
   );
@@ -181,23 +174,19 @@ function ACQCoachWithTeamButton({ accountId, onTeam, onBilling, onRepAs, onSignO
 
 function ImpersonationFrame({ children, onExit, tenantId }: { children: React.ReactNode; onExit: () => void; tenantId: string }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
-      {/* Sticky — takes 32px in the document flow so nothing below it gets hidden.
-          position:fixed was the old value and caused the banner to float over the
-          ACQCoach header nav buttons. */}
+    <div>
       <div style={{
-        position: "sticky", top: 0, zIndex: 1000,
-        height: 32, background: "#4e7d3d", flexShrink: 0,
+        position: "fixed", top: 0, left: 0, right: 0, height: 32, background: "#4e7d3d",
         color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", gap: 14,
-        fontSize: 11, fontFamily: "'Open Sans', sans-serif", letterSpacing: "0.04em", fontWeight: 600,
+        fontSize: 11, fontFamily: "'Open Sans', sans-serif", letterSpacing: "0.04em",
+        zIndex: 1000, fontWeight: 600,
       }}>
         <span>SUPER ADMIN · Viewing customer {tenantId.slice(0, 8)}…</span>
         <button onClick={onExit} style={{ background: "rgba(0,0,0,0.3)", color: "#fff", border: "1px solid rgba(255,255,255,0.3)", padding: "3px 10px", borderRadius: 4, cursor: "pointer", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em" }}>
           ← Back to admin
         </button>
       </div>
-      {/* No paddingTop needed — the sticky banner occupies its own 32px in flow. */}
-      <div style={{ flex: 1 }}>{children}</div>
+      <div style={{ paddingTop: 32 }}>{children}</div>
     </div>
   );
 }

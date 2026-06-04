@@ -1,0 +1,65 @@
+# Platform Auth — shared GoTrue against platform-db.
+# Issues JWTs signed with PLATFORM_JWT_SECRET, which is shared with both
+# ACQ Coach and Lead Intel so their PostgREST + edge functions can
+# validate tokens issued here.
+#
+# Apps' own GoTrues stay running for fallback/legacy but new logins go
+# through this service (launcher posts to /auth/v1/token).
+
+services:
+  platform-auth:
+    image: supabase/gotrue:v2.158.1
+    container_name: platform-auth
+    restart: unless-stopped
+    depends_on:
+      - platform-auth-init
+    ports:
+      - "${HOST_PORT:-9998}:9999"
+    environment:
+      GOTRUE_API_HOST: "0.0.0.0"
+      GOTRUE_API_PORT: "9999"
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${PLATFORM_AUTH_ADMIN_PASSWORD}@platform-db:5432/platform?search_path=auth
+      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost:8080}
+      GOTRUE_URI_ALLOW_LIST: "*"
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_SECRET: ${PLATFORM_JWT_SECRET}
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"     # local — accept new signups without email confirmation
+      GOTRUE_LOG_LEVEL: info
+      # No SMTP configured — accept-auto-confirm means no emails sent.
+      # Add SMTP envs if/when you want password-reset emails to actually deliver.
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL:-http://localhost:9998}
+    networks:
+      - platform-shared
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9999/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # One-shot init: run migrations against platform-db then exit.
+  platform-auth-init:
+    image: supabase/gotrue:v2.158.1
+    container_name: platform-auth-init
+    restart: "no"
+    command: ["auth", "migrate"]
+    environment:
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${PLATFORM_AUTH_ADMIN_PASSWORD}@platform-db:5432/platform?search_path=auth
+      GOTRUE_JWT_SECRET: ${PLATFORM_JWT_SECRET}
+      GOTRUE_API_HOST: "0.0.0.0"
+      GOTRUE_API_PORT: "9999"
+      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost:8080}
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL:-http://localhost:9998}
+    networks:
+      - platform-shared
+
+networks:
+  platform-shared:
+    name: platform-shared
+    external: true

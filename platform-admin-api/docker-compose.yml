@@ -1,0 +1,32 @@
+services:
+  platform-admin-api:
+    build: .
+    image: platform-admin-api:latest
+    container_name: platform-admin-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Connection string for platform-db. Uses the platform_admin role —
+      # has RW on the user/customer/access tables + audit_log insert.
+      PLATFORM_ADMIN_DB_URL: "${PLATFORM_ADMIN_DB_URL:-}"
+      # Symmetric key for pgp_sym_encrypt/decrypt of GHL tokens. Lives ONLY here.
+      TOKEN_ENCRYPTION_KEY: "${TOKEN_ENCRYPTION_KEY:-}"
+      # Connection strings for the two app DBs — used for the bridge-write
+      # (mirror new token into each app's local plaintext column so existing
+      # edge functions keep working without code changes).
+      ACQ_DB_URL: "${ACQ_DB_URL:-}"
+      LEADINTEL_DB_URL: "${LEADINTEL_DB_URL:-}"
+      PORT: "8080"
+    networks:
+      - platform-shared
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/admin-api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+networks:
+  platform-shared:
+    name: platform-shared
+    external: true

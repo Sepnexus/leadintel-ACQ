@@ -12,7 +12,6 @@ import ResetPasswordPage from "./pages/ResetPassword.tsx";
 import AcceptInvitePage from "./pages/AcceptInvite.tsx";
 import BillingPage from "./pages/Billing.tsx";
 import { AuthProvider } from "./contexts/AuthContext";
-import { ThemeProvider } from "./contexts/ThemeContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AppSwitcher } from "./components/AppSwitcher";
 import AdminTenantsPage from "./pages/admin/AdminTenantsPage";
@@ -27,7 +26,6 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <ThemeProvider>
     <TooltipProvider>
       <Toaster />
       <Sonner />
@@ -58,7 +56,6 @@ const App = () => (
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
-    </ThemeProvider>
   </QueryClientProvider>
 );
 

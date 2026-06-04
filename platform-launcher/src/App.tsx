@@ -3,6 +3,7 @@ import { loadConfig, type LauncherConfig } from "./config";
 import { getSession, clearSessions, buildSsoLink, type ProductKey } from "./auth";
 import { Login } from "./Login";
 import { Dashboard } from "./Dashboard";
+import { AdminShell } from "./admin/AdminShell";
 import { COLORS } from "./theme";
 
 export function App() {
@@ -10,16 +11,22 @@ export function App() {
   const [authed, setAuthed] = useState<boolean>(
     () => !!getSession("acq") || !!getSession("leadintel")
   );
+  const [showAdmin, setShowAdmin] = useState<boolean>(
+    () => window.location.hash.startsWith("#/admin")
+  );
 
   useEffect(() => {
     loadConfig().then(setCfg);
   }, []);
 
+  // Reflect URL hash → admin view toggle (so Back/Forward + reload work)
+  useEffect(() => {
+    const onHash = () => setShowAdmin(window.location.hash.startsWith("#/admin"));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
   // ── Deep-link switch: ?goto=<product> ────────────────────────────────────────
-  // The apps' AppSwitcher routes here when they don't hold a peer token.
-  // We hold the canonical sessions, so redirect straight into the target app
-  // with a fresh SSO handoff. If we have no session for it, fall through to the
-  // normal dashboard/login (so the user isn't stuck on a broken link).
   useEffect(() => {
     if (!cfg) return;
     const goto = new URLSearchParams(window.location.search).get("goto");
@@ -31,7 +38,6 @@ export function App() {
       const peerKey: ProductKey = key === "acq" ? "leadintel" : "acq";
       window.location.replace(buildSsoLink(url, session, { [peerKey]: getSession(peerKey) }));
     } else {
-      // No session for that product — strip the param and show the dashboard/login.
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, [cfg]);
@@ -42,12 +48,26 @@ export function App() {
   if (!authed) {
     return <Login cfg={cfg} onAuthed={() => setAuthed(true)} />;
   }
+  if (showAdmin) {
+    return (
+      <AdminShell
+        onClose={() => {
+          window.history.replaceState(null, "", window.location.pathname);
+          setShowAdmin(false);
+        }}
+      />
+    );
+  }
   return (
     <Dashboard
       cfg={cfg}
       onLogout={() => {
         clearSessions();
         setAuthed(false);
+      }}
+      onOpenAdmin={() => {
+        window.location.hash = "#/admin/users";
+        setShowAdmin(true);
       }}
     />
   );

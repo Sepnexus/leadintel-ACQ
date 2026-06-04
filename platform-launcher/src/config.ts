@@ -8,6 +8,10 @@ export type LauncherConfig = {
   leadintelUrl: string;
   leadintelApiUrl: string;
   leadintelAnonKey: string;
+  // Phase C2 — shared platform GoTrue. Login routes here; the issued JWT
+  // is signed with a secret shared by ACQ + LI + platform-auth, so the same
+  // token validates against all three backends.
+  platformAuthUrl: string;
 };
 
 const DEFAULTS: LauncherConfig = {
@@ -19,6 +23,7 @@ const DEFAULTS: LauncherConfig = {
   leadintelApiUrl: "http://localhost:54422",
   leadintelAnonKey:
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzc5OTE0NTgwLCJleHAiOjIwOTUyNzQ1ODB9.UkqBCF2fE78tsbl4QAhhoqBktG2lSChZTBFEjYHfZjA",
+  platformAuthUrl: "http://localhost:9998",
 };
 
 export async function loadConfig(): Promise<LauncherConfig> {
