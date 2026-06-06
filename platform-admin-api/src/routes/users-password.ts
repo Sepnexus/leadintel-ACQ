@@ -28,6 +28,7 @@
 import { sql, acqSql, liSql } from "../db.ts";
 import { AuthedAdmin, json } from "../auth.ts";
 import bcrypt from "npm:bcryptjs@2.4.3";
+import { ensureProvisioned } from "../lib/provisioning.ts";
 
 interface BridgeResult { ok: boolean; created?: boolean; error?: string }
 
@@ -115,8 +116,46 @@ export async function setUserPassword(
     upsertAuthUser(liSql, id, target.email, hash),
   ]);
 
+  // App-level provisioning: ensureProvisioned() creates the per-app role
+  // rows (ACQ public.user_roles, LI public.users + tenant_users) and
+  // back-pointers (platform.users.acq_user_id / leadintel_user_id) for
+  // every (customer, product) the user belongs to. Without this, the
+  // user has a valid login but the apps show "no roles assigned" because
+  // their per-app user table doesn't know who they are.
+  //
+  // For invited-but-never-onboarded users (akshay+10 pattern), this is
+  // what turns "Set Password" into a full first-time bootstrap.
+  const memberships = await sql<{ customer_id: string; product: "acq_coach" | "lead_intel" }[]>`
+    SELECT DISTINCT cu.customer_id, cpa.product
+    FROM platform.customer_users cu
+    JOIN platform.customer_product_access cpa ON cpa.customer_id = cu.customer_id
+    WHERE cu.user_id = ${id}::uuid
+      AND cpa.enabled = true
+      AND (cpa.valid_until IS NULL OR cpa.valid_until > now())
+  `;
+  const provisioning_results: Array<{
+    customer_id: string;
+    product: string;
+    ok: boolean;
+    created?: string[];
+    skipped?: string;
+    error?: string;
+  }> = [];
+  for (const m of memberships) {
+    const r = await ensureProvisioned(id, m.customer_id, m.product);
+    provisioning_results.push({
+      customer_id: m.customer_id,
+      product: m.product,
+      ok: r.ok,
+      created: r.created,
+      skipped: r.skipped,
+      error: r.error,
+    });
+  }
+
   // Audit log — capture *which* bridges succeeded + whether each row was
-  // newly created (vs updated), never the password itself.
+  // newly created (vs updated) + which app-side rows were provisioned.
+  // Never log the password itself.
   await sql`
     INSERT INTO platform.audit_log (actor_user_id, target_user_id, action, metadata)
     VALUES (
@@ -127,6 +166,7 @@ export async function setUserPassword(
         target_email: target.email,
         platform_auth: platformR,
         bridges: { acq: acqR, leadintel: liR },
+        provisioning: provisioning_results,
       })}
     )
   `;
@@ -136,8 +176,9 @@ export async function setUserPassword(
     user_id: id,
     platform_auth: platformR,
     bridges: { acq: acqR, leadintel: liR },
+    provisioning: provisioning_results,
     note: platformR.created
-      ? "User did not yet have a platform-auth row — provisioned and password set. They can log in now."
-      : "User can log in with the new password immediately. Existing sessions remain valid until expiry.",
+      ? "User did not yet have a platform-auth row — provisioned and password set. App-level role rows created. They can log in now."
+      : "User can log in with the new password immediately. App-level role rows verified.",
   });
 }
