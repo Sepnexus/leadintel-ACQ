@@ -40,9 +40,16 @@ BEGIN
   SELECT id INTO v_existing_id FROM auth.users WHERE id = p_user_id;
 
   IF v_existing_id IS NOT NULL THEN
+    -- COALESCE the NULL-but-must-be-'' token columns to '' alongside the
+    -- password update. Heals rows created before this fix landed (where
+    -- those columns were left NULL) without needing a separate one-off.
     UPDATE auth.users
-       SET encrypted_password = p_encrypted_password,
-           updated_at         = now()
+       SET encrypted_password    = p_encrypted_password,
+           confirmation_token    = COALESCE(confirmation_token,    ''),
+           recovery_token        = COALESCE(recovery_token,        ''),
+           email_change_token_new = COALESCE(email_change_token_new, ''),
+           email_change          = COALESCE(email_change,          ''),
+           updated_at            = now()
      WHERE id = p_user_id;
     -- Fall through to identity-upsert below in case the user was created
     -- before we started provisioning identities (e.g. earlier admin-set
@@ -73,9 +80,20 @@ BEGIN
   -- Provision a fresh GoTrue user. email_confirmed_at=now() so /token
   -- grant works without an email-confirmation step (the user's email was
   -- already established via the platform invite flow).
+  -- IMPORTANT: GoTrue's Go SQL driver scans confirmation_token,
+  -- recovery_token, email_change_token_new, and email_change into Go
+  -- `string` fields — NULL trips a "converting NULL to string is
+  -- unsupported" error at login time and surfaces as the generic
+  -- "Database error querying schema" 500. The other token columns
+  -- (email_change_token_current, phone_change_token, reauthentication_
+  -- token, phone_change) already default to '' in the schema, so we
+  -- only need to override the ones that don't.
   INSERT INTO auth.users (
     instance_id, id, aud, role, email, encrypted_password,
-    email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+    email_confirmed_at,
+    confirmation_token, recovery_token,
+    email_change_token_new, email_change,
+    raw_app_meta_data, raw_user_meta_data,
     created_at, updated_at, is_sso_user, is_anonymous
   ) VALUES (
     '00000000-0000-0000-0000-000000000000'::uuid,
@@ -85,6 +103,8 @@ BEGIN
     p_email,
     p_encrypted_password,
     now(),
+    '', '',          -- confirmation_token, recovery_token  (NOT NULL for GoTrue scan)
+    '', '',          -- email_change_token_new, email_change
     '{"provider":"email","providers":["email"]}'::jsonb,
     '{}'::jsonb,
     now(),
