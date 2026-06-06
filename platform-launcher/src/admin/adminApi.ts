@@ -220,9 +220,10 @@ export const adminApi = {
     jsonOr<{
       ok: true;
       user_id: string;
+      platform_auth: { ok: boolean; created?: boolean; error?: string };
       bridges: {
-        acq:       { ok: boolean; error?: string };
-        leadintel: { ok: boolean; error?: string };
+        acq:       { ok: boolean; created?: boolean; error?: string };
+        leadintel: { ok: boolean; created?: boolean; error?: string };
       };
       note: string;
     }>(fetch(`${BASE}/users/${id}/password`, {

@@ -326,8 +326,12 @@ function SetPasswordModal({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<{
-    acq:       { ok: boolean; error?: string };
-    leadintel: { ok: boolean; error?: string };
+    platform_auth: { ok: boolean; created?: boolean; error?: string };
+    bridges: {
+      acq:       { ok: boolean; created?: boolean; error?: string };
+      leadintel: { ok: boolean; created?: boolean; error?: string };
+    };
+    note: string;
   } | null>(null);
 
   const tooShort = pw.length > 0 && pw.length < 8;
@@ -340,7 +344,11 @@ function SetPasswordModal({
     const r = await adminApi.setUserPassword(userId, pw);
     setBusy(false);
     if (!r.ok) { setErr(r.error); return; }
-    setResult(r.data.bridges);
+    setResult({
+      platform_auth: r.data.platform_auth,
+      bridges: r.data.bridges,
+      note: r.data.note,
+    });
   }
 
   return (
@@ -360,18 +368,12 @@ function SetPasswordModal({
         </div>
 
         {result ? (
-          // Success view — show per-bridge outcome.
+          // Success view — show per-backend outcome.
           <>
-            <div style={{
-              padding: "12px 14px", borderRadius: 8, marginBottom: 16,
-              background: "rgba(78,125,61,0.12)", border: `1px solid ${COLORS.GREEN}`,
-              color: COLORS.GREEN, fontSize: 13,
-            }}>
-              ✓ Password updated on platform-auth.
-            </div>
             {[
-              { name: "ACQ Coach", r: result.acq },
-              { name: "Lead Intel", r: result.leadintel },
+              { name: "Platform Auth", r: result.platform_auth },
+              { name: "ACQ Coach",     r: result.bridges.acq },
+              { name: "Lead Intel",    r: result.bridges.leadintel },
             ].map(({ name, r }) => (
               <div key={name} style={{
                 display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -382,12 +384,14 @@ function SetPasswordModal({
               }}>
                 <span style={{ color: COLORS.TEXT }}>{name}</span>
                 <span style={{ color: r.ok ? COLORS.GREEN : "#c0392b" }}>
-                  {r.ok ? "✓ synced" : `✗ ${r.error || "failed"}`}
+                  {r.ok
+                    ? (r.created ? "✓ provisioned" : "✓ updated")
+                    : `✗ ${r.error || "failed"}`}
                 </span>
               </div>
             ))}
             <div style={{ fontSize: 11, color: COLORS.T3, marginTop: 12, lineHeight: 1.5 }}>
-              User can log in with the new password immediately. Their existing sessions remain valid until natural expiry.
+              {result.note}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
               <button onClick={onClose} style={{

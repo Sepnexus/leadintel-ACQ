@@ -29,23 +29,66 @@ import { sql, acqSql, liSql } from "../db.ts";
 import { AuthedAdmin, json } from "../auth.ts";
 import bcrypt from "npm:bcryptjs@2.4.3";
 
-interface BridgeResult { ok: boolean; error?: string }
+interface BridgeResult { ok: boolean; created?: boolean; error?: string }
 
-async function bridgeUpdate(
+// Upsert a user into a GoTrue auth.users table with the supplied hash.
+// On UPDATE: just bumps encrypted_password + updated_at.
+// On INSERT: provisions the minimal columns GoTrue needs for /token grant
+// to succeed — aud/role = 'authenticated', email_confirmed_at = now() so
+// the user can log in immediately without an email-confirmation step.
+//
+// Why INSERT here? Two paths trigger missing rows:
+//   1) "team_member_invited" flow creates platform.users but NOT auth.users
+//      (the password hasn't been chosen yet — there's no row to write).
+//   2) A user was provisioned on platform-auth but never visited ACQ/LI,
+//      so they exist on platform but not on the app DBs.
+// In both cases, an admin setting the password is effectively *completing
+// the signup*, so creating the row is the right behaviour.
+async function upsertAuthUser(
   db: any,
   userId: string,
+  email: string,
   hash: string,
 ): Promise<BridgeResult> {
   if (!db) return { ok: false, error: "bridge_unavailable" };
   try {
-    const rows = await db`
+    // Try UPDATE first
+    const updated = await db`
       UPDATE auth.users
       SET encrypted_password = ${hash}, updated_at = now()
       WHERE id = ${userId}::uuid
       RETURNING id
     `;
-    if (rows.length === 0) return { ok: false, error: "user_not_in_app_db" };
-    return { ok: true };
+    if (updated.length > 0) return { ok: true, created: false };
+
+    // No row — INSERT the minimal GoTrue row. instance_id is the historical
+    // multi-tenant nullable column; we use the conventional zero-UUID that
+    // every single-tenant supabase install uses.
+    await db`
+      INSERT INTO auth.users (
+        instance_id, id, aud, role, email, encrypted_password,
+        email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+        created_at, updated_at, is_sso_user, is_anonymous
+      ) VALUES (
+        '00000000-0000-0000-0000-000000000000'::uuid,
+        ${userId}::uuid,
+        'authenticated',
+        'authenticated',
+        ${email},
+        ${hash},
+        now(),
+        ${db.json({ provider: "email", providers: ["email"] })},
+        ${db.json({})},
+        now(),
+        now(),
+        false,
+        false
+      )
+      ON CONFLICT (id) DO UPDATE
+        SET encrypted_password = EXCLUDED.encrypted_password,
+            updated_at = now()
+    `;
+    return { ok: true, created: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -72,56 +115,36 @@ export async function setUserPassword(
     );
   }
 
-  // Look up target user
+  // Look up target user (platform.users is the source of truth for who
+  // exists in our system; auth.users may or may not be populated yet).
   const targetRows = await sql<{ id: string; email: string }[]>`
     SELECT id, email FROM platform.users WHERE id = ${id}::uuid
   `;
   if (targetRows.length === 0) return json({ error: "not_found" }, 404);
   const target = targetRows[0];
 
-  // Sanity: confirm target also exists in auth.users on platform-db
-  // (every platform.users row should have a matching auth.users — they're
-  // back-pointed during signup — but check defensively).
-  const authExists = await sql<{ exists: boolean }[]>`
-    SELECT EXISTS(SELECT 1 FROM auth.users WHERE id = ${id}::uuid) AS exists
-  `;
-  if (!authExists[0]?.exists) {
-    return json(
-      { error: "auth_user_missing", reason: "user is in platform.users but not platform-auth auth.users" },
-      409,
-    );
-  }
-
   // Hash with bcryptjs — cost 10 matches GoTrue's default.
   const hash = await bcrypt.hash(password, 10);
 
-  // Source of truth: platform-db. If this fails, the whole thing fails.
-  let platformUpdated = false;
-  try {
-    const r = await sql<{ id: string }[]>`
-      UPDATE auth.users
-      SET encrypted_password = ${hash}, updated_at = now()
-      WHERE id = ${id}::uuid
-      RETURNING id
-    `;
-    platformUpdated = r.length > 0;
-  } catch (e) {
+  // Source of truth: platform-db. Upsert (handles invited-but-never-logged-in
+  // users whose platform.users row exists without a matching auth.users).
+  const platformR = await upsertAuthUser(sql, id, target.email, hash);
+  if (!platformR.ok) {
     return json(
-      { error: "platform_update_failed", reason: (e as Error).message },
+      { error: "platform_update_failed", reason: platformR.error },
       500,
     );
   }
-  if (!platformUpdated) {
-    return json({ error: "platform_update_no_rows" }, 500);
-  }
 
-  // Bridge to both app DBs in parallel. Non-fatal — but surfaced.
+  // Bridge to both app DBs in parallel. Same upsert semantics so a user
+  // can be bootstrapped into ACQ/LI auth even if they've never visited.
   const [acqR, liR] = await Promise.all([
-    bridgeUpdate(acqSql, id, hash),
-    bridgeUpdate(liSql, id, hash),
+    upsertAuthUser(acqSql, id, target.email, hash),
+    upsertAuthUser(liSql, id, target.email, hash),
   ]);
 
-  // Audit log — capture *which* bridges succeeded, never the password.
+  // Audit log — capture *which* bridges succeeded + whether each row was
+  // newly created (vs updated), never the password itself.
   await sql`
     INSERT INTO platform.audit_log (actor_user_id, target_user_id, action, metadata)
     VALUES (
@@ -130,6 +153,7 @@ export async function setUserPassword(
       'user_password_set_by_admin',
       ${sql.json({
         target_email: target.email,
+        platform_auth: platformR,
         bridges: { acq: acqR, leadintel: liR },
       })}
     )
@@ -138,7 +162,10 @@ export async function setUserPassword(
   return json({
     ok: true,
     user_id: id,
+    platform_auth: platformR,
     bridges: { acq: acqR, leadintel: liR },
-    note: "User can log in with the new password immediately. Existing sessions remain valid until expiry.",
+    note: platformR.created
+      ? "User did not yet have a platform-auth row — provisioned and password set. They can log in now."
+      : "User can log in with the new password immediately. Existing sessions remain valid until expiry.",
   });
 }
