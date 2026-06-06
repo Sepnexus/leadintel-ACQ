@@ -14,6 +14,7 @@ import BillingPage from "./pages/Billing.tsx";
 import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AppSwitcher } from "./components/AppSwitcher";
+import { SyncStatusBar } from "./components/SyncStatusBar";
 import AdminTenantsPage from "./pages/admin/AdminTenantsPage";
 import AdminTenantDetailPage from "./pages/admin/AdminTenantDetailPage";
 import AdminTenantTransactionsPage from "./pages/admin/AdminTenantTransactionsPage";
@@ -32,6 +33,7 @@ const App = () => (
       <AppSwitcher />
       <BrowserRouter>
         <AuthProvider>
+          <SyncStatusBar />
           <Routes>
             {/* Public auth routes */}
             <Route path="/login" element={<LoginPage />} />

@@ -110,6 +110,50 @@ export async function logAudit(opts: {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Master keys (OPENAI / ANTHROPIC / STRIPE / etc.) editable from the
+// platform admin UI. Read precedence:
+//   1) Deno.env (deployment-time override)
+//   2) platform.master_keys row (set via launcher UI)
+// In-process 60s cache.
+// ─────────────────────────────────────────────────────────────────
+let masterKeyCache: Record<string, string> | null = null;
+let masterKeyExpiry = 0;
+const MASTER_KEY_TTL_MS = 60_000;
+
+async function loadMasterKeys(): Promise<Record<string, string>> {
+  if (masterKeyCache && Date.now() < masterKeyExpiry) return masterKeyCache;
+  if (!sql) { masterKeyCache = {}; masterKeyExpiry = Date.now() + MASTER_KEY_TTL_MS; return masterKeyCache; }
+  try {
+    const rows = await sql<{ key_name: string; key_value: string }[]>`
+      SELECT key_name, key_value FROM platform.master_keys
+    `;
+    masterKeyCache = Object.fromEntries(rows.map(r => [r.key_name, r.key_value]));
+  } catch (e) {
+    console.error("[platform] loadMasterKeys failed (cache empty):", (e as Error).message);
+    masterKeyCache = {};
+  }
+  masterKeyExpiry = Date.now() + MASTER_KEY_TTL_MS;
+  return masterKeyCache!;
+}
+
+export async function getEnvOrMasterKey(name: string): Promise<string | undefined> {
+  const fromEnv = Deno.env.get(name);
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
+  const m = await loadMasterKeys();
+  return m[name];
+}
+
+// Platform-wide markup multiplier (USAGE_MARKUP_MULTIPLIER master key).
+// Default 1.0 = pass-through. 2.5 = 250%.
+export function applyPlatformMarkup(rawCents: number): number {
+  if (rawCents <= 0) return 0;
+  const raw = Deno.env.get("USAGE_MARKUP_MULTIPLIER") || "1.0";
+  const m = Number(raw);
+  const mult = Number.isFinite(m) && m > 0 ? m : 1.0;
+  return Math.ceil(rawCents * mult);
+}
+
 export function extractUserIdFromJwt(req: Request): string | null {
   const auth = req.headers.get("authorization");
   if (!auth?.startsWith("Bearer ")) return null;

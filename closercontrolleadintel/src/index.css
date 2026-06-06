@@ -5,6 +5,41 @@
 @tailwind utilities;
 
 @layer base {
+  /* Platform theme CSS variables (consumed by utils/leadUtils.ts COLORS).
+     Default = dark. Light theme activated by [data-theme="light"] on <html>,
+     set on cc_sso handoff from the launcher's choice. */
+  :root {
+    --cc-bg:   #000000;
+    --cc-s1:   #0a0a0a;
+    --cc-s2:   #111111;
+    --cc-s3:   #1a1a1a;
+    --cc-b1:   #1f1f1f;
+    --cc-b2:   #2a2a2a;
+    --cc-b3:   #333333;
+    --cc-text: #f4f4f4;
+    --cc-t2:   #959595;
+    --cc-t3:   #565656;
+    --cc-grn:  #4e7d3d;
+    --cc-grnl: #5a9147;
+    --cc-grnd: #3a6030;
+    --cc-red:  #f04444;
+    --cc-amb:  #f5a623;
+    --cc-blu:  #4a9eff;
+    --cc-prp:  #a78bfa;
+  }
+  [data-theme="light"] {
+    --cc-bg:   #ffffff;
+    --cc-s1:   #f7f7f8;
+    --cc-s2:   #f1f1f3;
+    --cc-s3:   #e8e9ec;
+    --cc-b1:   #e4e6ea;
+    --cc-b2:   #d1d5da;
+    --cc-b3:   #bcc1c8;
+    --cc-text: #0f1115;
+    --cc-t2:   #50545b;
+    --cc-t3:   #8a8f97;
+  }
+
   :root {
     --background: 0 0% 0%;
     --foreground: 0 0% 96%;

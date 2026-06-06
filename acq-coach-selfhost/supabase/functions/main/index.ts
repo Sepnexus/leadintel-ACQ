@@ -10,6 +10,36 @@ declare const EdgeRuntime: any;
 
 console.log("[main] booting router");
 
+// ─── Master Keys overlay ────────────────────────────────────────────────
+// Pull editable platform-wide keys (OPENAI / STRIPE / ...) from platform-db
+// on each request (60s cache) and overlay them onto the worker's envVars.
+// This is how UI changes in Platform Admin take effect without restarts.
+// Deployment .env values STILL serve as fallback when a master key is unset.
+import postgres from "npm:postgres@3.4.5";
+const PLATFORM_DB_URL = Deno.env.get("PLATFORM_DB_URL") ?? "";
+const sql = PLATFORM_DB_URL
+  ? postgres(PLATFORM_DB_URL, { max: 2, idle_timeout: 30, connect_timeout: 5, prepare: false })
+  : null;
+
+let masterCache: Record<string, string> | null = null;
+let masterExp = 0;
+
+async function getMasterKeys(): Promise<Record<string, string>> {
+  if (masterCache && Date.now() < masterExp) return masterCache;
+  if (!sql) { masterCache = {}; masterExp = Date.now() + 60_000; return masterCache; }
+  try {
+    const rows = await sql<{ key_name: string; key_value: string }[]>`
+      SELECT key_name, key_value FROM platform.master_keys
+    `;
+    masterCache = Object.fromEntries(rows.map(r => [r.key_name, r.key_value]));
+  } catch (e) {
+    console.error("[main] master_keys load failed:", (e as Error).message);
+    masterCache = masterCache ?? {};
+  }
+  masterExp = Date.now() + 60_000;
+  return masterCache;
+}
+
 Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
   const segments = url.pathname.replace(/^\/+/, "").split("/");
@@ -25,7 +55,14 @@ Deno.serve(async (req: Request) => {
   const servicePath = `/home/deno/functions/${serviceName}`;
 
   try {
-    const envVars = Object.entries(Deno.env.toObject());
+    // Build envVars = container env + DB master_keys overlay.
+    // DB wins: if a key exists in both, the UI-managed value is used.
+    // Container env stays as the source of truth for non-editable infra vars
+    // (DB URLs, JWT_SECRET, service role keys, etc.).
+    const containerEnv = Deno.env.toObject();
+    const master = await getMasterKeys();
+    const merged = { ...containerEnv, ...master };
+    const envVars = Object.entries(merged);
     const worker = await EdgeRuntime.userWorkers.create({
       servicePath,
       memoryLimitMb: 256,
@@ -52,3 +89,4 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+

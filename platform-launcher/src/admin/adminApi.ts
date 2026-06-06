@@ -143,6 +143,18 @@ export interface AuditEvent {
   product: Product | null;
 }
 
+// Editable platform-wide API keys (OPENAI, ANTHROPIC, STRIPE, ...).
+// Stored in platform.master_keys, read by edge fns via getEnvOrMasterKey().
+export interface MasterKey {
+  name: string;
+  description: string;
+  sensitive: boolean;
+  set: boolean;
+  length: number;
+  updated_at: string | null;
+  updated_by_email: string | null;
+}
+
 // ── API methods ──
 export const adminApi = {
   me:               () => jsonOr<MeResponse>(fetch(`${BASE}/me`,        { headers: authHeader() })),
@@ -187,16 +199,39 @@ export const adminApi = {
     jsonOr<{ token: string | null; message?: string }>(fetch(`${BASE}/customers/${id}/ghl/token?confirm=true`, {
       headers: authHeader(),
     })),
-  validateGhlCredentials: (id: string, pit_token: string, location_id?: string) =>
-    jsonOr<{ ok: boolean; ghl_status?: number; ghl_response?: string; location?: { name?: string; address?: string } }>(fetch(`${BASE}/customers/${id}/ghl/validate`, {
+  // pit_token is optional: backend falls back to the stored encrypted token
+  // if not supplied (so we can validate without forcing a reveal).
+  validateGhlCredentials: (id: string, pit_token?: string, location_id?: string) =>
+    jsonOr<{
+      ok: boolean; ghl_status?: number;
+      message?: string; summary?: string;
+      location?: { name?: string; address?: string; country?: string };
+    }>(fetch(`${BASE}/customers/${id}/ghl/validate`, {
       method: "POST",
       headers: { ...authHeader(), "Content-Type": "application/json" },
-      body: JSON.stringify({ pit_token, location_id }),
+      body: JSON.stringify({ pit_token: pit_token || undefined, location_id }),
     })),
   listUsers:        (q = "") => jsonOr<{ users: UserRow[]; count: number }>(fetch(`${BASE}/users?q=${encodeURIComponent(q)}`, { headers: authHeader() })),
   getUser:          (id: string) => jsonOr<UserDetail>(fetch(`${BASE}/users/${id}`, { headers: authHeader() })),
   // Per-user access toggles were removed. Access derives from customer membership
   // — manage on the Customers page. setUserAccess removed.
+  setupStatus: (id: string) => jsonOr<{
+    steps: Array<{ id: string; label: string; done: boolean; detail: string; deep_link?: string }>;
+    all_done: boolean;
+  }>(fetch(`${BASE}/customers/${id}/setup-status`, { headers: authHeader() })),
+  // ── Editable master keys (OPENAI / STRIPE / ...) ───────────────────────────
+  listMasterKeys:   () => jsonOr<{ keys: MasterKey[]; count: number }>(fetch(`${BASE}/platform-settings/master-keys`, { headers: authHeader() })),
+  setMasterKey:     (name: string, value: string) =>
+    jsonOr<{ ok: true; key_name: string; length: number }>(fetch(`${BASE}/platform-settings/master-keys/${name}`, {
+      method: "PUT",
+      headers: { ...authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    })),
+  deleteMasterKey:  (name: string) =>
+    jsonOr<{ ok: true; key_name: string; was_present: boolean }>(fetch(`${BASE}/platform-settings/master-keys/${name}`, {
+      method: "DELETE",
+      headers: authHeader(),
+    })),
   listAudit:        (limit = 100, action?: string) =>
     jsonOr<{ events: AuditEvent[]; count: number }>(fetch(`${BASE}/audit?limit=${limit}${action ? `&action=${encodeURIComponent(action)}` : ""}`, { headers: authHeader() })),
   refreshWallet:    (id: string) =>

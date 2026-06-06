@@ -78,6 +78,34 @@ export async function setGhlCredentials(req: Request, admin: AuthedAdmin, id: st
         console.error("[admin-api] bridge write to leadintel failed:", (e as Error).message);
       }
     }
+
+    // Fire-and-forget: trigger the initial LI sync now that token is real.
+    // Forwards the admin's JWT (it's signed with the platform-wide secret +
+    // LI's GoTrue trusts that secret, so this just works). Returns
+    // immediately; sync runs in background and the SyncStatusBar polls.
+    if (customer.leadintel_tenant_id) {
+      const adminJwt = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+      // Use the internal docker hostname for the LI app's nginx (main container)
+      // which proxies /functions/v1/* to the edge runtime.
+      const LI_URL = Deno.env.get("LI_FUNCTIONS_BASE_URL") ?? "http://leadintel:54322";
+      try {
+        fetch(`${LI_URL}/functions/v1/ghl-sync`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${adminJwt}`,
+          },
+          body: JSON.stringify({
+            tenant_id: customer.leadintel_tenant_id,
+            mode: "full",
+            resource: "all",
+            trigger_initial: true,
+          }),
+        }).catch(e => console.warn("[admin-api] LI initial sync dispatch warn:", e.message));
+      } catch (e) {
+        console.warn("[admin-api] LI initial sync setup failed:", (e as Error).message);
+      }
+    }
   }
 
   // Audit
@@ -141,38 +169,123 @@ export async function revealGhlToken(req: Request, admin: AuthedAdmin, id: strin
   return json({ token });
 }
 
-// POST /admin-api/customers/:id/ghl/validate  body: { pit_token, location_id? }
-// Pings GHL with the supplied token to confirm it works before saving.
+// POST /admin-api/customers/:id/ghl/validate  body: { pit_token?, location_id? }
+// Pings GHL with the supplied token to confirm it works.
+//
+// If body.pit_token is omitted, falls back to the customer's stored encrypted
+// PIT token — so a user can re-validate without re-typing the secret.
+//
+// Resilience: GHL frequently 429s the same token when other workers (ghl-sync,
+// ai-analyze, etc.) are hitting it. We retry once after a short backoff and
+// also surface a friendly message instead of the raw JSON.
 export async function validateGhlCredentials(req: Request, _admin: AuthedAdmin, id: string): Promise<Response> {
   const body = await req.json().catch(() => null) as { pit_token?: string; location_id?: string } | null;
-  if (!body?.pit_token) {
-    return json({ error: "bad_request", reason: "pit_token required" }, 400);
-  }
   const locRow = await sql<{ ghl_location_id: string | null }[]>`
     SELECT ghl_location_id FROM platform.customers WHERE id = ${id}::uuid
   `;
   if (locRow.length === 0) return json({ error: "not_found" }, 404);
-  const locationId = body.location_id?.trim() || locRow[0].ghl_location_id;
+  const locationId = body?.location_id?.trim() || locRow[0].ghl_location_id;
   if (!locationId) {
     return json({ error: "bad_request", reason: "no location_id available (set one first)" }, 400);
   }
 
-  try {
+  // Resolve the token to use: caller-supplied (when editing) OR stored value.
+  let token = body?.pit_token?.trim();
+  if (!token) {
+    if (!TOKEN_KEY) {
+      return json({ error: "server_misconfigured", reason: "TOKEN_ENCRYPTION_KEY not set" }, 500);
+    }
+    const rows = await sql<{ token: string | null }[]>`
+      SELECT platform.get_ghl_pit_token(${id}::uuid, ${TOKEN_KEY!}) AS token
+    `;
+    token = rows[0]?.token ?? undefined;
+    if (!token) {
+      return json({ error: "bad_request", reason: "no stored token — paste a PIT token in the field above first" }, 400);
+    }
+  }
+
+  interface PingResult {
+    status: number;
+    text: string;
+    rateLimit: {
+      dailyRemaining?: number; dailyLimit?: number;
+      dailyResetMs?: number;
+      windowRemaining?: number; windowMax?: number;
+    };
+  }
+  async function ping(): Promise<PingResult> {
     const r = await fetch(`https://services.leadconnectorhq.com/locations/${locationId}`, {
       headers: {
-        Authorization: `Bearer ${body.pit_token}`,
+        Authorization: `Bearer ${token}`,
         Accept: "application/json",
         Version: "2021-07-28",
       },
     });
-    const text = await r.text();
-    if (!r.ok) {
-      return json({ ok: false, ghl_status: r.status, ghl_response: text.slice(0, 400) }, 200);
+    const num = (h: string): number | undefined => {
+      const v = r.headers.get(h);
+      return v == null ? undefined : Number(v);
+    };
+    return {
+      status: r.status,
+      text: await r.text(),
+      rateLimit: {
+        dailyRemaining: num("x-ratelimit-daily-remaining"),
+        dailyLimit:    num("x-ratelimit-limit-daily"),
+        dailyResetMs:  num("x-ratelimit-daily-reset"),
+        windowRemaining: num("x-ratelimit-remaining"),
+        windowMax:     num("x-ratelimit-max"),
+      },
+    };
+  }
+
+  try {
+    // One GHL call per click — no auto-retry. Retries inside this handler
+    // double the request rate, which makes the 429 worse the more the user
+    // clicks. The frontend enforces a cooldown for the user-driven retry.
+    const { status, text, rateLimit } = await ping();
+    if (status === 429) {
+      // Read GHL's headers to tell the user exactly what's happening.
+      const daily = rateLimit.dailyRemaining;
+      const cap   = rateLimit.dailyLimit;
+      const reset = rateLimit.dailyResetMs;
+      const resetMin = reset != null ? Math.ceil(reset / 60000) : null;
+      let message: string;
+      if (daily === 0) {
+        message =
+          `Daily GHL quota exhausted for this token` +
+          (cap ? ` (${cap.toLocaleString()} calls/day used)` : "") +
+          (resetMin != null ? `. Resets in ~${resetMin} min.` : ".") +
+          " Our platform isn't calling GHL — something outside (a GHL workflow, Zapier/Make automation, or an old integration) is using this same PIT token. Find and pause it, or rotate to a fresh token in GHL.";
+      } else {
+        message = "GHL rate limit hit. Wait ~30 seconds before trying again.";
+      }
+      return json({ ok: false, ghl_status: 429, message, rate_limit: rateLimit }, 200);
     }
-    let parsed: unknown = null;
+    if (status === 401 || status === 403) {
+      return json({
+        ok: false, ghl_status: status,
+        message: "GHL rejected the token. Check that the PIT token is current and has access to this location.",
+      }, 200);
+    }
+    if (status === 404) {
+      return json({
+        ok: false, ghl_status: 404,
+        message: `GHL says location ${locationId} doesn't exist on this PIT token's account.`,
+      }, 200);
+    }
+    if (status < 200 || status >= 300) {
+      return json({ ok: false, ghl_status: status, message: text.slice(0, 400) }, 200);
+    }
+    let parsed: any = null;
     try { parsed = JSON.parse(text); } catch { /* keep null */ }
-    return json({ ok: true, location: parsed });
+    return json({
+      ok: true,
+      location: parsed,
+      summary: parsed
+        ? `Connected to "${parsed.name ?? parsed.companyName ?? locationId}" (${parsed.country ?? "—"})`
+        : "Connected.",
+    });
   } catch (e) {
-    return json({ ok: false, error: "network_error", reason: (e as Error).message }, 200);
+    return json({ ok: false, error: "network_error", message: `Network error reaching GHL: ${(e as Error).message}` }, 200);
   }
 }

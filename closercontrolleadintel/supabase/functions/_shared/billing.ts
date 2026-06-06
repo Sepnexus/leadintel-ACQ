@@ -27,6 +27,14 @@ function admin(): SupabaseClient {
 let _cachedMultiplier: number | null = null;
 async function getMultiplier(sb: SupabaseClient): Promise<number> {
   if (_cachedMultiplier !== null) return _cachedMultiplier;
+  // Platform-wide USAGE_MARKUP_MULTIPLIER master key wins. Set it in
+  // Platform Admin → Settings → Master Keys (e.g. "2.5" for 250%).
+  // Falls back to the legacy per-tenant RPC, then 2.0 default.
+  const platformRaw = Deno.env.get("USAGE_MARKUP_MULTIPLIER");
+  if (platformRaw) {
+    const n = Number(platformRaw);
+    if (Number.isFinite(n) && n > 0) { _cachedMultiplier = n; return n; }
+  }
   try {
     const { data } = await sb.rpc("get_ai_markup_multiplier");
     const n = Number(data);

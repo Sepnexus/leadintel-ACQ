@@ -7,6 +7,7 @@ import { Pill, Toggle, ErrorBanner } from "./AdminLayout";
 import { AddCustomerModal } from "./AddCustomerModal";
 import { GhlCredentialsCard } from "./GhlCredentialsCard";
 import { BillingCard } from "./BillingCard";
+import { SetupChecklistCard } from "./SetupChecklistCard";
 import { useToast } from "./Toast";
 
 const FONT = "'Open Sans', system-ui, -apple-system, sans-serif";
@@ -215,6 +216,9 @@ function CustomerDetailView({ customerId, onBack }: { customerId: string; onBack
       </div>
 
       {error && <ErrorBanner>{error}</ErrorBanner>}
+
+      {/* Setup checklist — onboarding progress, deep-links into apps for module-specific config */}
+      <SetupChecklistCard customerId={c.id} />
 
       {/* GHL credentials — editable */}
       <GhlCredentialsCard customer={c} onChanged={load} />

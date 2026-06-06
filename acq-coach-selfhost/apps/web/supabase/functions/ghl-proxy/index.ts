@@ -36,7 +36,13 @@ async function loadBillingRules(admin: any, accountId: string): Promise<BillingR
 const whisperCost = (seconds: number, r: BillingRules) => (Math.max(0, seconds) / 60) * r.whisperCentsPerMin;
 const gptCost = (tokIn: number, tokOut: number, r: BillingRules) =>
   (tokIn / 1000) * r.openaiInCentsPer1k + (tokOut / 1000) * r.openaiOutCentsPer1k;
-const billCents = (providerCents: number, r: BillingRules) => Math.max(1, Math.round(providerCents * r.markup));
+// USAGE_MARKUP_MULTIPLIER (platform-wide master key) wins over per-customer
+// markup when set to anything other than 1.0.
+const billCents = (providerCents: number, r: BillingRules) => {
+  const platform = Number(Deno.env.get("USAGE_MARKUP_MULTIPLIER") || "1.0");
+  const m = (Number.isFinite(platform) && platform !== 1.0) ? platform : r.markup;
+  return Math.max(1, Math.round(providerCents * m));
+};
 
 
 const errorMessage = (err: unknown) => {

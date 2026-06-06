@@ -1471,8 +1471,15 @@ Status per category: strong (8-10), ok (6-7.9), weak (4-5.9), critical (0-3.9).
 
 Coaching rules: seller should talk 60%+, never give price before situation discovery, end with specific next step time.
 
+KEY MOMENTS — critical rules:
+For each moment in the "moments" array, you must populate two fields with extreme specificity:
+
+"transcript_quote": Copy the exact 1-3 sentences from the transcript where this moment occurred. Use the speaker's actual words verbatim — do not paraphrase or summarize. This is the raw evidence of the missed opportunity or strength.
+
+"rewrite": For weak/critical moments, give the EXACT words the rep should have said — word for word, as if reading from a teleprompter. Format it as: 'When [seller name or "the seller"] said: "[exact seller quote from transcript]" — you should have said: "[exact rep script]"'. Rules for the rep script: (1) Use the seller's actual name if mentioned. (2) Reference their specific pain point — if they said foreclosure, say foreclosure; if they mentioned a brother-in-law, use that; if they said they need to move by March, say March. (3) Reference their actual timeline, financial situation, or motivation if disclosed. (4) Sound natural and conversational — wholesaling language, not corporate. (5) Never give generic advice like "engage the seller to share more." Every rewrite must be anchored to something the seller actually said in THIS call. For strong moments, rewrite can acknowledge what worked well and why it was effective.
+
 Respond ONLY valid JSON, no markdown:
-{"detected":{"sellerType":"string","sellerTypeLabel":"string","callType":"string","callTypeLabel":"string","sellerTalkRatio":"string","repTalkRatio":"string"},"score":{"overall":0,"grade":"string","categories":[{"name":"string","score":0,"status":"string","oneliner":"string"}]},"verdict":"string","moments":[{"category":"string","status":"string","what":"string","why":"string","rewrite":"string"}],"strengths":["string"]}`;
+{"detected":{"sellerType":"string","sellerTypeLabel":"string","callType":"string","callTypeLabel":"string","sellerTalkRatio":"string","repTalkRatio":"string"},"score":{"overall":0,"grade":"string","categories":[{"name":"string","score":0,"status":"string","oneliner":"string"}]},"verdict":"string","moments":[{"category":"string","status":"string","what":"string","why":"string","transcript_quote":"string","rewrite":"string"}],"strengths":["string"]}`;
 
       const openaiKey = Deno.env.get("OPENAI_API_KEY");
 
@@ -1501,7 +1508,7 @@ Respond ONLY valid JSON, no markdown:
               { role: "system", content: scoringPrompt },
               { role: "user", content: call.transcript },
             ],
-            max_completion_tokens: 3000,
+            max_completion_tokens: 4500,
             response_format: { type: "json_object" },
           }),
         });
@@ -1575,6 +1582,61 @@ Respond ONLY valid JSON, no markdown:
         score_id: scoreRecord.id,
       }).eq("id", call_id);
 
+      // ── Opportunity signal extraction (second AI call — failure is non-fatal)
+      let opportunitySignals: any = null;
+      const signalsPrompt = `You are ACQ Coach AI for real estate wholesalers. Analyze this acquisition call transcript for seller opportunity signals.
+
+Real estate wholesaling context — look for:
+- financial_pressure: foreclosure, behind on payments, liens, needs cash urgently
+- life_event: divorce, death in family, inheritance, relocation, health issue
+- external_deadline: probate court date, tax sale deadline, listing expiration, hard move date
+- emotional_detachment: out of state, tired landlord, inherited and unwanted, checked out
+- price_flexible: just wants it gone, can't afford repairs, explicitly mentioned accepting less for speed
+- competitor_pressure: talking to other investors, listed with agent, received other offers
+
+Return motivation_score (0-100 — how motivated is this seller to close quickly), an array of observed signals with exact evidence quotes, urgency_level, the seller's stated timeline, a specific next-action instruction for the rep, and the single most revealing thing the seller said.
+
+Respond ONLY valid JSON, no markdown:
+{"motivation_score":0,"signals":[{"type":"financial_pressure","evidence":"exact quote or paraphrase","weight":10}],"urgency_level":"immediate","estimated_timeline":"string","recommended_next_action":"string","key_quote":"string"}`;
+
+      try {
+        const sigRes = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${openaiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: usedModel,
+            messages: [
+              { role: "system", content: signalsPrompt },
+              { role: "user", content: call.transcript },
+            ],
+            max_completion_tokens: 1000,
+            response_format: { type: "json_object" },
+          }),
+        });
+        if (sigRes.ok) {
+          const sigData = await sigRes.json();
+          const sigContent = sigData.choices?.[0]?.message?.content || "";
+          const sigCleaned = sigContent.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+          opportunitySignals = JSON.parse(sigCleaned);
+          // Persist to the score record
+          await supabaseAdmin
+            .from("call_scores")
+            .update({ opportunity_signals: opportunitySignals })
+            .eq("id", scoreRecord.id);
+          // Accumulate tokens so billing covers both calls
+          tokensIn  += sigData.usage?.prompt_tokens    || 0;
+          tokensOut += sigData.usage?.completion_tokens || 0;
+        } else {
+          const errText = await sigRes.text();
+          console.error("Opportunity signals call failed:", sigRes.status, errText);
+        }
+      } catch (e) {
+        console.error("Opportunity signals extraction error:", e);
+      }
+
       // ── Cost tracking: provider rates × per-customer markup
       const scoreRules = await loadBillingRules(supabaseAdmin, call.account_id);
       const providerCostCents = gptCost(tokensIn, tokensOut, scoreRules);
@@ -1609,8 +1671,9 @@ Respond ONLY valid JSON, no markdown:
 
       return new Response(JSON.stringify({
         ok: true,
-        score: scoreRecord,
+        score: { ...scoreRecord, opportunity_signals: opportunitySignals ?? scoreRecord.opportunity_signals },
         ai_result: aiResult,
+        opportunity_signals: opportunitySignals,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

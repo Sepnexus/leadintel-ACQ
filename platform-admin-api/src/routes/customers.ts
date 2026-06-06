@@ -2,6 +2,8 @@
 
 import { sql } from "../db.ts";
 import { AuthedAdmin, json } from "../auth.ts";
+import { syncCustomerMemberships } from "../lib/provisioning.ts";
+import { ensureAppCustomerRow } from "../lib/app-customer.ts";
 
 type Product = "acq_coach" | "lead_intel";
 
@@ -157,7 +159,46 @@ export async function setCustomerAccess(req: Request, admin: AuthedAdmin, id: st
             ${sql.json({ customer_id: id, customer_name: exists[0].name, valid_until: body.valid_until ?? null })})
   `;
 
-  return json({ ok: true });
+  // When ENABLING a product:
+  //   1. Ensure the customer EXISTS in the target app (ghl_accounts/tenants)
+  //   2. Push existing customer members into that app's tables
+  // No-op for revoke.
+  let appRow: unknown = null;
+  let provisioning: unknown = null;
+  if (body.enabled) {
+    try {
+      appRow = await ensureAppCustomerRow(id, body.product);
+    } catch (e) {
+      console.error("[setCustomerAccess] ensureAppCustomerRow failed:", (e as Error).message);
+    }
+    try {
+      provisioning = await syncCustomerMemberships(id);
+    } catch (e) {
+      console.error("[setCustomerAccess] provisioning failed:", (e as Error).message);
+    }
+  }
+
+  return json({ ok: true, app_row: appRow, provisioning });
+}
+
+// POST /admin-api/customers/:id/sync — manually re-run provisioning for all
+// current customer_users into all enabled products. Idempotent. Useful when
+// a customer admin (or you) notices a user can't see anything in an app.
+export async function syncMemberships(_req: Request, admin: AuthedAdmin, id: string): Promise<Response> {
+  const exists = await sql`SELECT id, name FROM platform.customers WHERE id = ${id}::uuid`;
+  if (exists.length === 0) return json({ error: "not_found" }, 404);
+
+  const result = await syncCustomerMemberships(id);
+
+  await sql`
+    INSERT INTO platform.audit_log (actor_user_id, action, metadata)
+    VALUES (
+      ${admin.platformUserId}::uuid,
+      'customer_memberships_synced',
+      ${sql.json({ customer_id: id, customer_name: exists[0].name, count: result.results.length })}
+    )
+  `;
+  return json(result);
 }
 
 // POST /admin-api/customers  body: { name, ghl_location_id?, ghl_company_id?, plan?, is_test?, demo_mode?, trial_active?, trial_expires_at?, notes?, products?: Product[] }
@@ -218,12 +259,20 @@ export async function createCustomer(req: Request, admin: AuthedAdmin): Promise<
   `;
   const newId = rows[0].id;
 
+  // For each enabled product: (a) create the customer_product_access row,
+  // (b) create the corresponding app-side row (ghl_accounts for ACQ,
+  // tenants for LI), (c) link the new app id back into platform.customers.
+  // Without (b) the customer is invisible inside the app and downstream
+  // flows (GHL token mirror, user provisioning, GHL sync) all silently fail.
+  const provisioningResults: Array<{ product: Product; ok: boolean; created?: boolean; existed?: boolean; app_id?: string; error?: string }> = [];
   for (const p of products) {
     await sql`
       INSERT INTO platform.customer_product_access (customer_id, product, enabled, updated_by)
       VALUES (${newId}::uuid, ${p}::platform.product, true, ${admin.platformUserId}::uuid)
       ON CONFLICT (customer_id, product) DO NOTHING
     `;
+    const r = await ensureAppCustomerRow(newId, p);
+    provisioningResults.push({ product: p, ...r });
   }
 
   await sql`
@@ -231,11 +280,11 @@ export async function createCustomer(req: Request, admin: AuthedAdmin): Promise<
     VALUES (
       ${admin.platformUserId}::uuid,
       'customer_created',
-      ${sql.json({ customer_id: newId, name, ghl_location_id, products_enabled: products })}
+      ${sql.json({ customer_id: newId, name, ghl_location_id, products_enabled: products, provisioning: provisioningResults })}
     )
   `;
 
-  return json({ ok: true, id: newId }, 201);
+  return json({ ok: true, id: newId, app_provisioning: provisioningResults }, 201);
 }
 
 // PATCH /admin-api/customers/:id  body: { name?, status?, is_test?, demo_mode?, trial_active?, trial_expires_at?, notes? }

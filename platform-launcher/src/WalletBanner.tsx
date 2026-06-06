@@ -1,103 +1,86 @@
-// Combined wallet banner — shows the sum of every wallet the user can read
-// across both products. RLS in each app already restricts visibility, so
-// summing whatever each API returns gives the right number.
+// Unified wallet banner. Pulls from platform.customer_wallet via /admin-api/me
+// — one number, one source of truth. The per-product split is shown small +
+// secondary so the eye lands on the combined Platform Balance.
 //
-// This is the v1 "aggregate view" — wallets stay separate underneath. Real
-// merge (single ledger, single Stripe customer) lands in Phase B3/C1.
+// (The old version summed per-app PostgREST calls which double-counted and
+// triggered the HTTP 401 issues when the stored JWT was stale.)
 
 import { useEffect, useState } from "react";
 import type { LauncherConfig } from "./config";
 import { getSession } from "./auth";
 import { COLORS } from "./theme";
 
-interface Totals {
-  acqCents: number | null;
-  liCents:  number | null;
-  acqError: string | null;
-  liError:  string | null;
-}
-
-async function fetchWalletsBalance(
-  apiBase: string, anonKey: string, token: string, idCol: "account_id" | "tenant_id",
-): Promise<number | string> {
-  try {
-    const r = await fetch(`${apiBase}/rest/v1/wallets?select=balance_cents,${idCol}`, {
-      headers: {
-        apikey: anonKey,
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-    });
-    if (!r.ok) return `HTTP ${r.status}`;
-    const rows = (await r.json()) as Array<{ balance_cents: number }>;
-    return rows.reduce((s, w) => s + (w.balance_cents ?? 0), 0);
-  } catch (e) {
-    return (e as Error).message;
-  }
-}
-
-function fmtMoney(cents: number | null): string {
+function fmt(cents: number | null): string {
   if (cents === null) return "—";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 }
 
-export function WalletBanner({ cfg }: { cfg: LauncherConfig }) {
-  const [totals, setTotals] = useState<Totals>({ acqCents: null, liCents: null, acqError: null, liError: null });
+export function WalletBanner({ cfg: _cfg }: { cfg: LauncherConfig }) {
+  const [combined, setCombined] = useState<number | null>(null);
+  const [acq, setAcq]   = useState<number | null>(null);
+  const [li, setLi]     = useState<number | null>(null);
 
   useEffect(() => {
-    const acqSess = getSession("acq");
-    const liSess  = getSession("leadintel");
+    const tok = getSession("acq")?.access_token || getSession("leadintel")?.access_token;
+    if (!tok) return;
     let cancelled = false;
 
-    const acqP = acqSess
-      ? fetchWalletsBalance(cfg.acqApiUrl, cfg.acqAnonKey ?? "", acqSess.access_token, "account_id")
-      : Promise.resolve("(not signed into ACQ)" as string);
-    const liP  = liSess
-      ? fetchWalletsBalance(cfg.leadintelApiUrl, cfg.leadintelAnonKey ?? "", liSess.access_token, "tenant_id")
-      : Promise.resolve("(not signed into Lead Intel)" as string);
+    (async () => {
+      // List customers we belong to → pick the first → fetch its billing.
+      // Platform admins (multi-customer view) see the SUM across all customers.
+      try {
+        const r = await fetch(`/admin-api/me/customers`, { headers: { Authorization: `Bearer ${tok}` } });
+        if (!r.ok) return;
+        const { customers, is_platform_admin } = await r.json();
+        if (cancelled) return;
+        if (!customers?.length) { setCombined(0); return; }
 
-    Promise.all([acqP, liP]).then(([a, l]) => {
-      if (cancelled) return;
-      setTotals({
-        acqCents: typeof a === "number" ? a : null,
-        liCents:  typeof l === "number" ? l : null,
-        acqError: typeof a === "string" ? a : null,
-        liError:  typeof l === "string" ? l : null,
-      });
-    });
+        let totalC = 0, totalAcq = 0, totalLi = 0;
+        const list = is_platform_admin ? customers : [customers[0]];
+        for (const c of list) {
+          const b = await fetch(`/admin-api/me/customer/${c.id}/billing`, { headers: { Authorization: `Bearer ${tok}` } });
+          if (!b.ok) continue;
+          const data = await b.json();
+          totalC   += data.wallet?.balance_cents ?? 0;
+          for (const u of (data.usage_30d ?? [])) {
+            if (u.product === "acq_coach")  totalAcq += u.billed ?? 0;
+            if (u.product === "lead_intel") totalLi  += u.billed ?? 0;
+          }
+        }
+        if (cancelled) return;
+        setCombined(totalC); setAcq(totalAcq); setLi(totalLi);
+      } catch { /* swallow — banner just stays "—" */ }
+    })();
+
     return () => { cancelled = true; };
-  }, [cfg]);
-
-  const combined = (totals.acqCents ?? 0) + (totals.liCents ?? 0);
-  const haveAny = totals.acqCents !== null || totals.liCents !== null;
+  }, []);
 
   return (
     <div style={{
       background: COLORS.S1, border: `1px solid ${COLORS.B2}`, borderRadius: 12,
-      padding: "16px 22px", marginBottom: 22,
-      display: "flex", justifyContent: "space-between", alignItems: "center", gap: 24,
+      padding: "18px 24px", marginBottom: 22,
+      display: "flex", justifyContent: "space-between", alignItems: "center", gap: 24, flexWrap: "wrap",
     }}>
       <div>
-        <div style={{ fontSize: 11, color: COLORS.T3, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700 }}>
+        <div style={{ fontSize: 11, color: COLORS.T3, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 700 }}>
           Platform Balance
         </div>
-        <div style={{ fontSize: 28, fontWeight: 700, marginTop: 4, color: COLORS.TEXT }}>
-          {haveAny ? fmtMoney(combined) : "—"}
+        <div style={{ fontSize: 34, fontWeight: 800, marginTop: 6, color: COLORS.TEXT, letterSpacing: "-0.01em" }}>
+          {fmt(combined)}
+        </div>
+        <div style={{ fontSize: 11, color: COLORS.T3, marginTop: 4 }}>
+          One wallet · used by ACQ Coach + Lead Intel
         </div>
       </div>
-      <div style={{ display: "flex", gap: 22, fontSize: 12 }}>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ color: COLORS.T3 }}>ACQ Coach</div>
-          <div style={{ color: COLORS.TEXT, fontWeight: 600 }}>
-            {totals.acqError ? <span style={{ color: "#c34" }}>{totals.acqError}</span> : fmtMoney(totals.acqCents)}
-          </div>
+      <div style={{ display: "flex", gap: 18, fontSize: 11, color: COLORS.T3, textAlign: "right" }}>
+        <div>
+          <div style={{ letterSpacing: "0.06em", textTransform: "uppercase" }}>ACQ usage 30d</div>
+          <div style={{ color: COLORS.T2, fontWeight: 600, fontSize: 13, marginTop: 2 }}>{fmt(acq)}</div>
         </div>
         <div style={{ width: 1, background: COLORS.B2 }} />
-        <div style={{ textAlign: "right" }}>
-          <div style={{ color: COLORS.T3 }}>Lead Intel</div>
-          <div style={{ color: COLORS.TEXT, fontWeight: 600 }}>
-            {totals.liError ? <span style={{ color: "#c34" }}>{totals.liError}</span> : fmtMoney(totals.liCents)}
-          </div>
+        <div>
+          <div style={{ letterSpacing: "0.06em", textTransform: "uppercase" }}>LI usage 30d</div>
+          <div style={{ color: COLORS.T2, fontWeight: 600, fontSize: 13, marginTop: 2 }}>{fmt(li)}</div>
         </div>
       </div>
     </div>

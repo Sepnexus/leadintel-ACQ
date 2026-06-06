@@ -51,8 +51,13 @@ function whisperCost(seconds: number, r: BillingRules) {
 function gptCost(tokIn: number, tokOut: number, r: BillingRules) {
   return (tokIn / 1000) * r.openaiInCentsPer1k + (tokOut / 1000) * r.openaiOutCentsPer1k;
 }
+// USAGE_MARKUP_MULTIPLIER (master key, set in Platform Admin → Settings) wins
+// over the legacy per-customer markup field when set to anything other than
+// 1.0. Falls back to the per-customer markup otherwise.
 function bill(providerCents: number, r: BillingRules) {
-  return Math.max(1, Math.round(providerCents * r.markup));
+  const platformMarkup = Number(Deno.env.get("USAGE_MARKUP_MULTIPLIER") || "1.0");
+  const m = (Number.isFinite(platformMarkup) && platformMarkup !== 1.0) ? platformMarkup : r.markup;
+  return Math.max(1, Math.round(providerCents * m));
 }
 
 

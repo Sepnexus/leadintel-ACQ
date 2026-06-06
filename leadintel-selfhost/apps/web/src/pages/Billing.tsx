@@ -22,8 +22,37 @@ interface BillingSettingsRow {
   card_exp_year: number | null;
 }
 
-/** Full-page /billing route — wallet, top-up, save card, auto-recharge, usage, transactions. */
+/** /billing now redirects to the unified Account → Billing in the launcher. */
 export default function BillingPage() {
+  const launcherUrl = (() => {
+    if (typeof window === "undefined") return "http://localhost:8080/#/account/billing";
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    return isLocal ? "http://localhost:8080/#/account/billing" : "/#/account/billing";
+  })();
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#000", color: "#f4f4f4",
+      fontFamily: "'Open Sans', system-ui, sans-serif",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 24,
+    }}>
+      <div style={{ maxWidth: 520, textAlign: "center" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.18em",
+          color: "#7eb56a", textTransform: "uppercase", marginBottom: 14 }}>Moved</div>
+        <h2 style={{ margin: "0 0 10px", fontSize: 22 }}>Billing &amp; wallet moved to your Account</h2>
+        <p style={{ color: "#999", fontSize: 13.5, lineHeight: 1.6, margin: "0 0 22px" }}>
+          One wallet, one card, used across ACQ Coach + Lead Intel.
+        </p>
+        <a href={launcherUrl} style={{
+          display: "inline-block", padding: "10px 22px", borderRadius: 8,
+          background: "#4e7d3d", color: "#fff", textDecoration: "none",
+          fontSize: 13, fontWeight: 700, letterSpacing: "0.02em",
+        }}>Open Account → Billing</a>
+      </div>
+    </div>
+  );
+}
+
+function _LegacyBillingPage() {
   const navigate = useNavigate();
   const { tenant, loading: tenantLoading } = useCurrentTenant();
   const tenantId = tenant?.id ?? null;

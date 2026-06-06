@@ -110,25 +110,6 @@ serve(async (req) => {
             _type: "credit",
           });
           if (error) console.error("credit_wallet error", error);
-
-          // Phase B5 — cross-product audit log entry
-          try {
-            const { logAudit } = await import("../_shared/platform.ts");
-            await logAudit({
-              actorPlatformUserId: null,  // webhook called by Stripe, not a user
-              product: "acq_coach",
-              action: "topup_succeeded",
-              metadata: {
-                acq_account_id: account_id,
-                amount_cents,
-                stripe_session_id,
-                stripe_customer_id,
-                customer_email: session.customer_details?.email || null,
-              },
-            });
-          } catch (auditErr) {
-            console.error("[payments-webhook] platform.audit_log write failed:", auditErr);
-          }
         }
 
         const patch: Record<string, unknown> = { account_id, updated_at: new Date().toISOString() };

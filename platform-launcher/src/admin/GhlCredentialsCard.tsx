@@ -2,7 +2,7 @@
 // Shows location ID (editable) + token status (Set / Last 4 / "set 3h ago").
 // Actions: Set/Rotate, Validate against GHL, Reveal (with audit warning).
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { COLORS } from "../theme";
 import { adminApi, CustomerDetail } from "./adminApi";
 
@@ -20,6 +20,14 @@ export function GhlCredentialsCard({ customer, onChanged }: {
   const [busy, setBusy]                   = useState(false);
   const [validation, setValidation]       = useState<null | { ok: boolean; detail: string }>(null);
   const [error, setError]                 = useState<string | null>(null);
+  // Cooldown timer (seconds) blocking rapid re-validates that would compound
+  // GHL's per-token rate limit. Set to 30 after a 429, 5 after a normal call.
+  const [cooldown, setCooldown]           = useState(0);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown(c => Math.max(0, c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   async function saveLocation() {
     setBusy(true); setError(null);
@@ -45,31 +53,31 @@ export function GhlCredentialsCard({ customer, onChanged }: {
   }
 
   async function validate() {
-    const tokenToCheck = tokenDraft.trim() || revealedToken || "";
-    if (!tokenToCheck) {
-      // Reveal first then validate against the saved token
-      const r = await adminApi.revealGhlToken(customer.id);
-      if (!r.ok || !r.data.token) {
-        setError("No token saved yet — paste one and click Validate.");
-        return;
-      }
-      setRevealedToken(r.data.token);
-      runValidate(r.data.token);
-    } else {
-      runValidate(tokenToCheck);
-    }
+    // Backend now falls back to the stored encrypted token when none is
+    // supplied — so we can validate without triggering a reveal (and the
+    // audit row that comes with it). Only pass the draft if the user is
+    // mid-edit.
+    const draftTok = tokenDraft.trim();
+    runValidate(draftTok || revealedToken || "");
   }
 
   async function runValidate(tok: string) {
     setBusy(true); setValidation(null); setError(null);
     const r = await adminApi.validateGhlCredentials(customer.id, tok);
     setBusy(false);
-    if (!r.ok) { setError(r.error); return; }
+    if (!r.ok) { setError(r.error); setCooldown(5); return; }
     if (r.data.ok) {
-      const name = r.data.location?.name ?? "(no name)";
-      setValidation({ ok: true, detail: `Connected — location: ${name}` });
+      const summary = (r.data as any).summary ?? `Connected — location: ${r.data.location?.name ?? "(no name)"}`;
+      setValidation({ ok: true, detail: summary });
+      // Soft cooldown so a happy user doesn't spam GHL by clicking 5 times.
+      setCooldown(5);
     } else {
-      setValidation({ ok: false, detail: `GHL responded ${r.data.ghl_status ?? "?"}: ${r.data.ghl_response ?? ""}`.slice(0, 240) });
+      const msg = (r.data as any).message
+        ?? `GHL responded ${r.data.ghl_status ?? "?"}: ${(r.data as any).ghl_response ?? ""}`;
+      setValidation({ ok: false, detail: String(msg).slice(0, 280) });
+      // 429 → 30s cooldown (matches GHL's typical reset window).
+      // Other failures → 10s to give the user a chance to read the message.
+      setCooldown(r.data.ghl_status === 429 ? 30 : 10);
     }
   }
 
@@ -86,9 +94,15 @@ export function GhlCredentialsCard({ customer, onChanged }: {
     <div style={{ background: COLORS.S1, border: `1px solid ${COLORS.B2}`, borderRadius: 10, marginBottom: 18 }}>
       <div style={{ padding: "14px 20px", borderBottom: `1px solid ${COLORS.B2}`, fontSize: 14, fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span>GHL Credentials</span>
-        <button onClick={validate} disabled={busy}
-          style={{ ...btnGhost, opacity: busy ? 0.5 : 1 }}>
-          {busy ? "Checking…" : "🌐 Validate against GHL"}
+        <button
+          onClick={validate}
+          disabled={busy || cooldown > 0}
+          style={{ ...btnGhost, opacity: (busy || cooldown > 0) ? 0.5 : 1, cursor: (busy || cooldown > 0) ? "not-allowed" : "pointer" }}
+          title={cooldown > 0 ? `Wait ${cooldown}s before re-checking (GHL rate window)` : ""}
+        >
+          {busy ? "Checking…"
+            : cooldown > 0 ? `🌐 Try again in ${cooldown}s`
+            : "🌐 Validate against GHL"}
         </button>
       </div>
 

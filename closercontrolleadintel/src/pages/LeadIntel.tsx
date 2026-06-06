@@ -25,6 +25,7 @@ import { VoiceFab } from "@/components/VoiceFab";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { LeadDetailPanel } from "@/components/lead-detail/LeadDetailPanel";
 import { UserMenu } from "@/components/auth/UserMenu";
+import { useTheme } from "@/contexts/ThemeContext";
 import { ChangePasswordSection } from "@/components/settings/ChangePasswordSection";
 import { useCurrentTenant } from "@/hooks/useCurrentTenant";
 import { EmptyTenantState } from "@/components/EmptyTenantState";
@@ -77,6 +78,7 @@ function createDefaultSettings(): Settings {
 }
 
 export default function LeadIntelPage() {
+  const { theme, toggleTheme } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
   const navigate = useNavigate();
@@ -632,7 +634,11 @@ export default function LeadIntelPage() {
   if (noTenantAssigned && !tenantLoading) {
     return (
       <div style={{ minHeight: "100vh", background: COLORS.BG }}>
-        <div style={{ display: "flex", justifyContent: "flex-end", padding: 16 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: 16, gap: 8 }}>
+          <button onClick={toggleTheme} title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            style={{ background: "transparent", border: "1px solid " + COLORS.B1, borderRadius: 8, padding: "6px 10px", color: COLORS.T2, fontSize: 15, cursor: "pointer", lineHeight: 1 }}>
+            {theme === "dark" ? "☀️" : "🌙"}
+          </button>
           <UserMenu onOpenSettings={() => { setActiveTab("settings"); setSettingsNav("account"); }} compact={isMobile} />
         </div>
         <EmptyTenantState />
@@ -699,6 +705,10 @@ export default function LeadIntelPage() {
               >
                 {allReps.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
+              <button onClick={toggleTheme} title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+                style={{ background: "transparent", border: "1px solid " + COLORS.B1, borderRadius: 8, padding: "6px 10px", color: COLORS.T2, fontSize: 15, cursor: "pointer", lineHeight: 1 }}>
+                {theme === "dark" ? "☀️" : "🌙"}
+              </button>
               <UserMenu onOpenSettings={() => { setActiveTab("settings"); setSettingsNav("account"); }} compact={isMobile} />
             </div>
           </div>
@@ -761,7 +771,7 @@ export default function LeadIntelPage() {
             onSelectLead={openLeadDetail}
             aiStatus={loading ? "analyzing" : (error && /credit|exhaust|AI_NO_CREDITS/i.test(error)) ? "exhausted" : "ready"}
             loading={leadsLoading}
-            userMenu={<><TenantSwitcher /><UserMenu onOpenSettings={() => { setActiveTab("settings"); setSettingsNav("account"); }} compact={isMobile} /></>}
+            userMenu={<><TenantSwitcher /><button onClick={toggleTheme} title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} style={{ background: "transparent", border: "1px solid " + COLORS.B1, borderRadius: 8, padding: "6px 10px", color: COLORS.T2, fontSize: 15, cursor: "pointer", lineHeight: 1 }}>{theme === "dark" ? "☀️" : "🌙"}</button><UserMenu onOpenSettings={() => { setActiveTab("settings"); setSettingsNav("account"); }} compact={isMobile} /></>}
           />
         )}
 

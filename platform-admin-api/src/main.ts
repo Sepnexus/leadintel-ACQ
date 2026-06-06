@@ -7,13 +7,20 @@
 import { requireAdmin, requireAuthedJwt, AuthedAdmin, json } from "./auth.ts";
 import "./db.ts"; // boots the connection pool + fail-fast check
 
-import { listCustomers, getCustomer, setCustomerAccess, updateCustomer, createCustomer } from "./routes/customers.ts";
+import { listCustomers, getCustomer, setCustomerAccess, updateCustomer, createCustomer, syncMemberships } from "./routes/customers.ts";
 import { listUsers, getUser } from "./routes/users.ts";
 import { listAudit } from "./routes/audit.ts";
 import { setGhlCredentials, revealGhlToken, validateGhlCredentials } from "./routes/ghl-credentials.ts";
 import { listPlatformKeys } from "./routes/platform-settings.ts";
 import { refreshWallet } from "./routes/wallet.ts";
 import { mirrorSession } from "./routes/sso.ts";
+import { listMasterKeys, setMasterKey, deleteMasterKey } from "./routes/master-keys.ts";
+import { getSetupStatus } from "./routes/setup-status.ts";
+import {
+  listMyCustomers, listMyTeam, inviteToTeam, removeFromTeam,
+  getMyBilling, getMyConnections, getMyActivity, setAutoRecharge,
+} from "./routes/me.ts";
+import { createTopupSession, createBillingPortalSession } from "./routes/topup.ts";
 
 const PORT = Number(Deno.env.get("PORT") ?? "8080");
 
@@ -33,6 +40,8 @@ const routes: Route[] = [
   { method: "GET",   pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/?$/, handler: getCustomer },
   { method: "PATCH", pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/?$/, handler: updateCustomer },
   { method: "POST",  pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/access\/?$/, handler: setCustomerAccess },
+  { method: "POST",  pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/sync\/?$/, handler: syncMemberships },
+  { method: "GET",   pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/setup-status\/?$/, handler: getSetupStatus },
   { method: "PATCH", pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/ghl\/?$/, handler: setGhlCredentials },
   { method: "GET",   pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/ghl\/token\/?$/, handler: revealGhlToken },
   { method: "POST",  pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/ghl\/validate\/?$/, handler: validateGhlCredentials },
@@ -40,6 +49,9 @@ const routes: Route[] = [
   { method: "GET",   pattern: /^\/admin-api\/users\/([0-9a-f-]+)\/?$/,     handler: getUser },
   { method: "GET",   pattern: /^\/admin-api\/audit\/?$/,                  handler: listAudit },
   { method: "GET",   pattern: /^\/admin-api\/platform-settings\/keys\/?$/, handler: listPlatformKeys },
+  { method: "GET",    pattern: /^\/admin-api\/platform-settings\/master-keys\/?$/,             handler: listMasterKeys },
+  { method: "PUT",    pattern: /^\/admin-api\/platform-settings\/master-keys\/([A-Z0-9_]+)\/?$/, handler: setMasterKey },
+  { method: "DELETE", pattern: /^\/admin-api\/platform-settings\/master-keys\/([A-Z0-9_]+)\/?$/, handler: deleteMasterKey },
   { method: "POST",  pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/wallet\/refresh\/?$/, handler: refreshWallet },
 ];
 
@@ -47,8 +59,21 @@ const routes: Route[] = [
 const HEALTH = /^\/admin-api\/health\/?$/;
 
 // Authn-only routes (any signed-in user, no admin requirement). Phase C2 SSO.
-const AUTHN_ONLY: { method: string; pattern: RegExp; handler: (req: Request) => Promise<Response> }[] = [
-  { method: "POST", pattern: /^\/admin-api\/sso\/mirror-session\/?$/, handler: mirrorSession },
+// Plus customer self-service /me/* routes — each handler enforces its own
+// member-of-customer check internally.
+type AuthnHandler = (req: Request, ...p: string[]) => Promise<Response>;
+const AUTHN_ONLY: { method: string; pattern: RegExp; handler: AuthnHandler }[] = [
+  { method: "POST",   pattern: /^\/admin-api\/sso\/mirror-session\/?$/,                       handler: mirrorSession },
+  { method: "GET",    pattern: /^\/admin-api\/me\/customers\/?$/,                              handler: listMyCustomers },
+  { method: "GET",    pattern: /^\/admin-api\/me\/customer\/([0-9a-f-]+)\/team\/?$/,           handler: listMyTeam },
+  { method: "POST",   pattern: /^\/admin-api\/me\/customer\/([0-9a-f-]+)\/team\/?$/,           handler: inviteToTeam },
+  { method: "DELETE", pattern: /^\/admin-api\/me\/customer\/([0-9a-f-]+)\/team\/([0-9a-f-]+)\/?$/, handler: removeFromTeam },
+  { method: "GET",    pattern: /^\/admin-api\/me\/customer\/([0-9a-f-]+)\/billing\/?$/,        handler: getMyBilling },
+  { method: "GET",    pattern: /^\/admin-api\/me\/customer\/([0-9a-f-]+)\/connections\/?$/,    handler: getMyConnections },
+  { method: "GET",    pattern: /^\/admin-api\/me\/customer\/([0-9a-f-]+)\/activity\/?$/,       handler: getMyActivity },
+  { method: "POST",   pattern: /^\/admin-api\/me\/customer\/([0-9a-f-]+)\/topup\/?$/,          handler: createTopupSession },
+  { method: "POST",   pattern: /^\/admin-api\/me\/customer\/([0-9a-f-]+)\/billing-portal\/?$/, handler: createBillingPortalSession },
+  { method: "PATCH",  pattern: /^\/admin-api\/me\/customer\/([0-9a-f-]+)\/billing\/auto-recharge\/?$/, handler: setAutoRecharge },
 ];
 
 Deno.serve({ port: PORT }, async (req) => {
@@ -68,7 +93,8 @@ Deno.serve({ port: PORT }, async (req) => {
   // Authn-only routes (no admin check, but valid JWT required)
   for (const r of AUTHN_ONLY) {
     if (r.method !== req.method) continue;
-    if (!r.pattern.test(url.pathname)) continue;
+    const m = url.pathname.match(r.pattern);
+    if (!m) continue;
     const authed = requireAuthedJwt(req);
     if (authed instanceof Response) {
       return new Response(await authed.text(), {
@@ -77,7 +103,7 @@ Deno.serve({ port: PORT }, async (req) => {
       });
     }
     try {
-      const res = await r.handler(req);
+      const res = await r.handler(req, ...m.slice(1));
       return new Response(await res.text(), {
         status: res.status,
         headers: { ...Object.fromEntries(res.headers), ...corsHeaders },
@@ -126,7 +152,7 @@ console.log(`[admin-api] listening on :${PORT}`);
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "authorization, content-type",
   "Access-Control-Max-Age": "86400",
 };

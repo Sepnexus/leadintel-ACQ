@@ -31,7 +31,22 @@ type SsoPayload = {
   access_token: string;
   refresh_token: string;
   peers?: Record<string, { access_token: string; refresh_token: string }>;
+  theme?: string;  // "dark" | "light" — propagated from the launcher
 };
+
+/** Apply theme to <html data-theme=...> and persist it. */
+function applyTheme(name: string) {
+  const t = name === "light" ? "light" : "dark";
+  try { document.documentElement.setAttribute("data-theme", t); } catch { /* noop */ }
+  try { localStorage.setItem("acqcoach_theme", t); } catch { /* noop */ }
+}
+
+// Pick up the persisted theme as early as possible (before any React render)
+// so there's no flash of the wrong theme on hard reload.
+try {
+  const persisted = localStorage.getItem("acqcoach_theme");
+  if (persisted) document.documentElement.setAttribute("data-theme", persisted);
+} catch { /* noop */ }
 
 function readPayload(): SsoPayload | null {
   const h = window.location.hash || "";
@@ -67,6 +82,9 @@ function clearHash() {
 export function consumeSsoHandoff(): boolean {
   const payload = readPayload();
   if (!payload) return false;
+
+  // Apply the launcher's theme choice (cross-origin localStorage isn't shared).
+  if (payload.theme) applyTheme(payload.theme);
 
   // Stash peer tokens so AppSwitcher can build cross-app links from inside this app.
   if (payload.peers) {

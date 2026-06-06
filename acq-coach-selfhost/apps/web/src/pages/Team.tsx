@@ -3,11 +3,53 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Users, ArrowLeft, UserPlus, AlertCircle, Trash2, ShieldCheck, Pencil, Check, X } from "lucide-react";
+import { AccountMovedBanner } from "@/components/AccountMovedBanner";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
 export default function TeamPage({ accountId, onBack }: { accountId: string; onBack: () => void }) {
+  // Team management has moved to the platform Account page. Show a full-page
+  // redirect-style message instead of the legacy in-app team manager.
+  return <MovedPage onBack={onBack} what="Team management" tabHint="team" />;
+}
+
+function MovedPage({ what, tabHint, onBack }: { what: string; tabHint: "team" | "billing"; onBack: () => void }) {
+  const launcherUrl = (() => {
+    if (typeof window === "undefined") return `http://localhost:8080/#/account/${tabHint}`;
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    return isLocal ? `http://localhost:8080/#/account/${tabHint}` : `/#/account/${tabHint}`;
+  })();
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#000", color: "#f4f4f4",
+      fontFamily: "'Open Sans', system-ui, sans-serif",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 24,
+    }}>
+      <div style={{ maxWidth: 520, textAlign: "center" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.18em",
+          color: "#7eb56a", textTransform: "uppercase", marginBottom: 14 }}>Moved</div>
+        <h2 style={{ margin: "0 0 10px", fontSize: 22 }}>{what} has moved to your Account</h2>
+        <p style={{ color: "#999", fontSize: 13.5, lineHeight: 1.6, margin: "0 0 22px" }}>
+          Manage your team, billing, and integrations in one place — the same wallet and members apply across ACQ Coach and Lead Intel.
+        </p>
+        <a href={launcherUrl} style={{
+          display: "inline-block", padding: "10px 22px", borderRadius: 8,
+          background: "#4e7d3d", color: "#fff", textDecoration: "none",
+          fontSize: 13, fontWeight: 700, letterSpacing: "0.02em",
+        }}>Open Account → {tabHint === "team" ? "Team" : "Billing"}</a>
+        <div>
+          <button onClick={onBack} style={{
+            marginTop: 16, background: "transparent", border: "1px solid #1c1c1c",
+            color: "#999", padding: "6px 14px", borderRadius: 6, cursor: "pointer", fontSize: 12,
+          }}>← Back to ACQ Coach</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function _LegacyTeamPage({ accountId, onBack }: { accountId: string; onBack: () => void }) {
   const { session } = useAuth();
   const [team, setTeam] = useState<any[]>([]);
   const [ghlUsers, setGhlUsers] = useState<any[]>([]);
@@ -95,6 +137,7 @@ export default function TeamPage({ accountId, onBack }: { accountId: string; onB
 
   return (
     <div className="cc-admin bg-background text-foreground" style={{ fontFamily: "'Open Sans', sans-serif", height: "100vh", overflowY: "auto" }}>
+      <AccountMovedBanner what="Team management" />
       {/* Sticky header bar */}
       <div className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-4">

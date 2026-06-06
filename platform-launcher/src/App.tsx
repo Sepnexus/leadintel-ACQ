@@ -4,24 +4,29 @@ import { getSession, clearSessions, buildSsoLink, type ProductKey } from "./auth
 import { Login } from "./Login";
 import { Dashboard } from "./Dashboard";
 import { AdminShell } from "./admin/AdminShell";
+import { AccountShell } from "./account/AccountShell";
 import { COLORS } from "./theme";
+
+type View = "dashboard" | "admin" | "account";
+
+function viewFromHash(): View {
+  const h = window.location.hash;
+  if (h.startsWith("#/admin"))   return "admin";
+  if (h.startsWith("#/account")) return "account";
+  return "dashboard";
+}
 
 export function App() {
   const [cfg, setCfg] = useState<LauncherConfig | null>(null);
   const [authed, setAuthed] = useState<boolean>(
     () => !!getSession("acq") || !!getSession("leadintel")
   );
-  const [showAdmin, setShowAdmin] = useState<boolean>(
-    () => window.location.hash.startsWith("#/admin")
-  );
+  const [view, setView] = useState<View>(viewFromHash);
+
+  useEffect(() => { loadConfig().then(setCfg); }, []);
 
   useEffect(() => {
-    loadConfig().then(setCfg);
-  }, []);
-
-  // Reflect URL hash → admin view toggle (so Back/Forward + reload work)
-  useEffect(() => {
-    const onHash = () => setShowAdmin(window.location.hash.startsWith("#/admin"));
+    const onHash = () => setView(viewFromHash());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -42,32 +47,29 @@ export function App() {
     }
   }, [cfg]);
 
-  if (!cfg) {
-    return <div style={{ minHeight: "100vh", background: COLORS.BG }} />;
+  function backToDashboard() {
+    window.location.hash = "";
+    window.history.replaceState(null, "", window.location.pathname);
+    setView("dashboard");
   }
-  if (!authed) {
-    return <Login cfg={cfg} onAuthed={() => setAuthed(true)} />;
-  }
-  if (showAdmin) {
-    return (
-      <AdminShell
-        onClose={() => {
-          window.history.replaceState(null, "", window.location.pathname);
-          setShowAdmin(false);
-        }}
-      />
-    );
-  }
+
+  if (!cfg)    return <div style={{ minHeight: "100vh", background: COLORS.BG }} />;
+  if (!authed) return <Login cfg={cfg} onAuthed={() => setAuthed(true)} />;
+
+  if (view === "admin")   return <AdminShell onClose={backToDashboard} />;
+  if (view === "account") return <AccountShell cfg={cfg} onClose={backToDashboard} />;
+
   return (
     <Dashboard
       cfg={cfg}
-      onLogout={() => {
-        clearSessions();
-        setAuthed(false);
-      }}
+      onLogout={() => { clearSessions(); setAuthed(false); }}
       onOpenAdmin={() => {
         window.location.hash = "#/admin/users";
-        setShowAdmin(true);
+        setView("admin");
+      }}
+      onOpenAccount={() => {
+        window.location.hash = "#/account/profile";
+        setView("account");
       }}
     />
   );

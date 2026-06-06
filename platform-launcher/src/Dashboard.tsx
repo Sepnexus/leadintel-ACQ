@@ -68,7 +68,10 @@ const ALL_PRODUCTS: Product[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function Dashboard({ cfg, onLogout, onOpenAdmin }: { cfg: LauncherConfig; onLogout: () => void; onOpenAdmin?: () => void }) {
+export function Dashboard({ cfg, onLogout, onOpenAdmin, onOpenAccount }: {
+  cfg: LauncherConfig; onLogout: () => void;
+  onOpenAdmin?: () => void; onOpenAccount?: () => void;
+}) {
   const [theme, setTheme]               = useState(getInitialTheme());
   const [showSettings, setShowSettings] = useState(false);
   const [userInfo, setUserInfo]         = useState<UserInfo | null>(null);
@@ -207,11 +210,15 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin }: { cfg: LauncherConfig;
               fontSize: 12, fontWeight: 600, cursor: "pointer", lineHeight: 1,
             }}>⚡ Admin</button>
           )}
-          <button onClick={() => setShowSettings(true)} title="Account settings" style={{
-            background: "transparent", border: `1px solid ${COLORS.B1}`,
-            borderRadius: 8, padding: "6px 12px", color: COLORS.T2,
-            fontSize: 12, fontWeight: 600, cursor: "pointer", lineHeight: 1,
-          }}>⚙ Account</button>
+          <button
+            onClick={() => (onOpenAccount ? onOpenAccount() : setShowSettings(true))}
+            title="Account settings"
+            style={{
+              background: "transparent", border: `1px solid ${COLORS.B1}`,
+              borderRadius: 8, padding: "6px 12px", color: COLORS.T2,
+              fontSize: 12, fontWeight: 600, cursor: "pointer", lineHeight: 1,
+            }}
+          >⚙ Account</button>
           <button onClick={toggleTheme}
             title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
             style={{
@@ -238,6 +245,37 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin }: { cfg: LauncherConfig;
 
       <main style={{ maxWidth: 760, margin: "0 auto", padding: "40px 24px 60px" }}>
         <WalletBanner cfg={cfg} />
+
+        {/* Visible CTAs to the unified Account areas — so customer admins
+            don't hunt for where "team / billing / GHL" lives. */}
+        <div style={{
+          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+          gap: 10, marginBottom: 28,
+        }}>
+          {[
+            { label: "Team",       hash: "team",        sub: "Invite & manage" },
+            { label: "Billing",    hash: "billing",     sub: "Wallet · payment · usage" },
+            { label: "Connections",hash: "connections", sub: "GHL location & token" },
+            { label: "Activity",   hash: "activity",    sub: "Recent events" },
+          ].map(item => (
+            <a key={item.hash}
+               href={`#/account/${item.hash}`}
+               onClick={(e) => { e.preventDefault(); onOpenAccount?.(); window.location.hash = `#/account/${item.hash}`; }}
+               style={{
+                 display: "block", textDecoration: "none",
+                 background: COLORS.S1, border: `1px solid ${COLORS.B2}`,
+                 borderRadius: 10, padding: "12px 14px",
+                 transition: "border-color 0.15s",
+               }}
+               onMouseEnter={e => (e.currentTarget.style.borderColor = COLORS.GREEN)}
+               onMouseLeave={e => (e.currentTarget.style.borderColor = COLORS.B2)}
+            >
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: COLORS.TEXT }}>{item.label}</div>
+              <div style={{ fontSize: 11, color: COLORS.T3, marginTop: 2 }}>{item.sub}</div>
+            </a>
+          ))}
+        </div>
+
         <h1 style={{ fontSize: 22, fontWeight: 800, color: COLORS.TEXT, margin: "0 0 6px", letterSpacing: "0.02em" }}>
           {greeting(userInfo.firstName)}
         </h1>
@@ -283,12 +321,7 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin }: { cfg: LauncherConfig;
                     </div>
                     <div style={{ fontSize: 11, color: COLORS.T3, marginTop: 2 }}>{p.tagline}</div>
                   </div>
-                  {available && label && p.key === "acq" && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em",
-                      color: p.accent, background: p.accent + "1e", borderRadius: 5, padding: "3px 8px",
-                    }}>{label}</span>
-                  )}
+                  {/* Per-card role badge removed — role is already shown once in the header chip. */}
                   {!available && (
                     <span style={{
                       fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em",

@@ -179,6 +179,12 @@ export function buildSsoLink(
     }
     if (Object.keys(p).length) payload.peers = p;
   }
+  // Propagate the launcher's chosen theme so the app paints in the same mode.
+  // The receiving app applies it via ccSsoHandoff → <html data-theme="…">.
+  try {
+    const theme = localStorage.getItem("acqcoach_theme");
+    if (theme) payload.theme = theme;
+  } catch { /* noop */ }
   return `${appUrl}/#cc_sso=${encodeURIComponent(btoa(JSON.stringify(payload)))}`;
 }
 

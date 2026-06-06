@@ -20,10 +20,49 @@ import { TopupCheckout } from "@/components/TopupCheckout";
 
 import { isPaymentsConfigured } from "@/lib/stripe";
 import { cn } from "@/lib/utils";
+import { AccountMovedBanner } from "@/components/AccountMovedBanner";
 
 const PRESETS = [25, 50, 100, 250];
 
 export default function Billing({ onBack }: { onBack?: () => void }) {
+  // Billing & wallet moved to platform Account.
+  const launcherUrl = (() => {
+    if (typeof window === "undefined") return "http://localhost:8080/#/account/billing";
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    return isLocal ? "http://localhost:8080/#/account/billing" : "/#/account/billing";
+  })();
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#000", color: "#f4f4f4",
+      fontFamily: "'Open Sans', system-ui, sans-serif",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 24,
+    }}>
+      <div style={{ maxWidth: 520, textAlign: "center" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.18em",
+          color: "#7eb56a", textTransform: "uppercase", marginBottom: 14 }}>Moved</div>
+        <h2 style={{ margin: "0 0 10px", fontSize: 22 }}>Billing &amp; wallet moved to your Account</h2>
+        <p style={{ color: "#999", fontSize: 13.5, lineHeight: 1.6, margin: "0 0 22px" }}>
+          One wallet, one card, used across ACQ Coach + Lead Intel.
+        </p>
+        <a href={launcherUrl} style={{
+          display: "inline-block", padding: "10px 22px", borderRadius: 8,
+          background: "#4e7d3d", color: "#fff", textDecoration: "none",
+          fontSize: 13, fontWeight: 700, letterSpacing: "0.02em",
+        }}>Open Account → Billing</a>
+        {onBack && (
+          <div>
+            <button onClick={onBack} style={{
+              marginTop: 16, background: "transparent", border: "1px solid #1c1c1c",
+              color: "#999", padding: "6px 14px", borderRadius: 6, cursor: "pointer", fontSize: 12,
+            }}>← Back to ACQ Coach</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function _LegacyBilling({ onBack }: { onBack?: () => void }) {
   const { who, session } = useAuth();
   const { toast } = useToast();
   const accountId = who?.admin_account_ids?.[0] || null;
@@ -51,6 +90,7 @@ export default function Billing({ onBack }: { onBack?: () => void }) {
   if (!accountId) {
     return (
       <div className="min-h-screen bg-background text-foreground flex items-center justify-center" style={{ fontFamily: "'Open Sans', sans-serif" }}>
+      <AccountMovedBanner what="Billing & wallet" />
         <div className="text-center max-w-sm p-8 border border-border rounded-lg">
           <ShieldCheck className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
           <div className="font-display text-lg font-bold mb-1">Customer admins only</div>
