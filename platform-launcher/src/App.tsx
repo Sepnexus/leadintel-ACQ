@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { loadConfig, type LauncherConfig } from "./config";
-import { getSession, clearSessions, buildSsoLink, type ProductKey } from "./auth";
+import {
+  getSession, saveSession, clearSessions, buildSsoLink,
+  refreshSession, jwtNeedsRefresh, type ProductKey,
+} from "./auth";
 import { Login } from "./Login";
 import { Dashboard } from "./Dashboard";
 import { AdminShell } from "./admin/AdminShell";
@@ -32,19 +35,52 @@ export function App() {
   }, []);
 
   // ── Deep-link switch: ?goto=<product> ────────────────────────────────────────
+  // Used by the Setup Checklist's "Open →" buttons and any other launcher-
+  // mediated app-switch. Flow: pull saved session → refresh if access_token
+  // is stale → handoff to the app via #cc_sso=<base64>. If refresh fails
+  // entirely (refresh_token also dead), wipe local state and force re-login
+  // — otherwise the receiving app would just bounce the user to its own
+  // login page, which is exactly the bug we're fixing.
   useEffect(() => {
     if (!cfg) return;
     const goto = new URLSearchParams(window.location.search).get("goto");
     if (goto !== "acq" && goto !== "leadintel") return;
     const key = goto as ProductKey;
-    const session = getSession(key);
-    if (session) {
+
+    (async () => {
+      let session = getSession(key);
+      if (!session) {
+        window.history.replaceState(null, "", window.location.pathname);
+        return;
+      }
+
+      // Refresh-before-handoff: avoids the "expired token → login page" trap
+      // when the user has been on the launcher for >1h.
+      if (jwtNeedsRefresh(session.access_token)) {
+        const fresh = await refreshSession(cfg.platformAuthUrl, session.refresh_token);
+        if (fresh) {
+          // Same JWT_SECRET + same session_id → both apps' SDKs accept it.
+          // Store under both keys so the peer link in the receiving app's
+          // AppSwitcher also has a non-stale token.
+          saveSession("acq", fresh);
+          saveSession("leadintel", fresh);
+          session = fresh;
+        } else {
+          // refresh_token also dead → can't SSO. Wipe + force fresh login.
+          clearSessions();
+          setAuthed(false);
+          window.history.replaceState(null, "", window.location.pathname);
+          return;
+        }
+      }
+
       const url = key === "acq" ? cfg.acqUrl : cfg.leadintelUrl;
       const peerKey: ProductKey = key === "acq" ? "leadintel" : "acq";
       window.location.replace(buildSsoLink(url, session, { [peerKey]: getSession(peerKey) }));
-    } else {
+    })().catch(e => {
+      console.error("[launcher] goto handoff failed:", e);
       window.history.replaceState(null, "", window.location.pathname);
-    }
+    });
   }, [cfg]);
 
   function backToDashboard() {

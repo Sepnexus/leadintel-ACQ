@@ -159,6 +159,60 @@ export async function dualLogin(
   return res;
 }
 
+// Refresh the saved session against platform-auth so the handed-off
+// access_token isn't stale. Supabase access tokens default to ~1h TTL;
+// without this, a user who's been on the launcher for >1h would hand off
+// an expired token and the receiving app would bounce them to login.
+//
+// The session_id stays the same across a refresh (auth.sessions row's
+// `id` is stable, only `refreshed_at` advances), so the mirror-session
+// rows in ACQ/LI remain valid — we don't need to re-mirror.
+//
+// Returns the fresh Session on success; null on any failure (caller
+// should fall back to a re-login).
+export async function refreshSession(
+  platformAuthUrl: string,
+  refreshToken: string,
+): Promise<Session | null> {
+  if (!refreshToken) return null;
+  try {
+    const r = await fetch(`${platformAuthUrl}/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!r.ok) return null;
+    const d = await r.json().catch(() => null);
+    if (!d?.access_token || !d?.refresh_token) return null;
+    return d as Session;
+  } catch {
+    return null;
+  }
+}
+
+// Decode a JWT's claims (no signature verification — we only need exp).
+function decodeJwtClaims(jwt: string): { exp?: number } | null {
+  try {
+    const part = jwt.split(".")[1] || "";
+    const b64 = part.replace(/-/g, "+").replace(/_/g, "/") + "==".slice(0, (4 - (part.length % 4)) % 4);
+    return JSON.parse(atob(b64));
+  } catch {
+    return null;
+  }
+}
+
+// True if the JWT is missing-exp, already-expired, or expires within the
+// next 5 minutes. Five-minute buffer = the receiving app gets a token good
+// for at least that long before it needs to refresh on its own.
+export function jwtNeedsRefresh(jwt: string | undefined): boolean {
+  if (!jwt) return true;
+  const claims = decodeJwtClaims(jwt);
+  const exp = claims?.exp;
+  if (!exp || typeof exp !== "number") return true;
+  const nowSec = Math.floor(Date.now() / 1000);
+  return exp - nowSec < 300;
+}
+
 // Build the handoff URL: app reads #cc_sso=<base64 json> and calls setSession.
 // `peers` carries sibling-app sessions so the receiving app's AppSwitcher can
 // build SSO links for cross-app switching without accessing the launcher's storage.
