@@ -44,6 +44,25 @@ BEGIN
        SET encrypted_password = p_encrypted_password,
            updated_at         = now()
      WHERE id = p_user_id;
+    -- Fall through to identity-upsert below in case the user was created
+    -- before we started provisioning identities (e.g. earlier admin-set
+    -- runs without this fix, or backfilled rows from Phase C2).
+    INSERT INTO auth.identities (
+      provider_id, user_id, identity_data, provider, created_at, updated_at
+    ) VALUES (
+      p_user_id::text,
+      p_user_id,
+      jsonb_build_object(
+        'sub',            p_user_id::text,
+        'email',          p_email,
+        'email_verified', false,
+        'phone_verified', false
+      ),
+      'email',
+      now(),
+      now()
+    )
+    ON CONFLICT (provider_id, provider) DO NOTHING;
     RETURN 'updated';
   END IF;
 
@@ -73,6 +92,29 @@ BEGIN
     false,
     false
   );
+
+  -- Ensure an email-provider auth.identities row exists. GoTrue's /token
+  -- grant_type=password handler joins users → identities (via user_id)
+  -- to resolve the login; if no identity exists for the email provider,
+  -- login fails with "Database error querying schema." Idempotent via
+  -- the (provider_id, provider) UNIQUE constraint.
+  INSERT INTO auth.identities (
+    provider_id, user_id, identity_data, provider, created_at, updated_at
+  ) VALUES (
+    p_user_id::text,
+    p_user_id,
+    jsonb_build_object(
+      'sub',            p_user_id::text,
+      'email',          p_email,
+      'email_verified', false,
+      'phone_verified', false
+    ),
+    'email',
+    now(),
+    now()
+  )
+  ON CONFLICT (provider_id, provider) DO NOTHING;
+
   RETURN 'created';
 END;
 $$;
