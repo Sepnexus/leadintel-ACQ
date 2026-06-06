@@ -167,6 +167,7 @@ export function AdminUsersPage() {
 function UserDetailView({ userId, onBack }: { userId: string; onBack: () => void }) {
   const [detail, setDetail] = useState<UserDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pwOpen, setPwOpen] = useState(false);
 
   async function load() {
     const r = await adminApi.getUser(userId);
@@ -208,16 +209,35 @@ function UserDetailView({ userId, onBack }: { userId: string; onBack: () => void
               platform user id: {detail.user.id}
             </div>
           </div>
-          {isAdmin && (
-            <span style={{
-              fontSize: 10, padding: "4px 10px", borderRadius: 4,
-              background: "rgba(255,200,80,0.12)", color: "#ffc966",
-              border: "1px solid rgba(255,200,80,0.35)",
-              letterSpacing: "0.06em", fontWeight: 700, fontFamily: "ui-monospace, monospace",
-            }}>PLATFORM ADMIN</span>
-          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+            {isAdmin && (
+              <span style={{
+                fontSize: 10, padding: "4px 10px", borderRadius: 4,
+                background: "rgba(255,200,80,0.12)", color: "#ffc966",
+                border: "1px solid rgba(255,200,80,0.35)",
+                letterSpacing: "0.06em", fontWeight: 700, fontFamily: "ui-monospace, monospace",
+              }}>PLATFORM ADMIN</span>
+            )}
+            <button
+              onClick={() => setPwOpen(true)}
+              style={{
+                background: COLORS.B2, border: `1px solid ${COLORS.B3}`,
+                borderRadius: 6, padding: "6px 12px", color: COLORS.T2,
+                fontSize: 12, cursor: "pointer", fontFamily: FONT, whiteSpace: "nowrap",
+              }}
+              title="Force-set this user's password across all backends"
+            >🔑 Set password</button>
+          </div>
         </div>
       </div>
+
+      {pwOpen && (
+        <SetPasswordModal
+          userId={userId}
+          email={detail.user.email}
+          onClose={() => setPwOpen(false)}
+        />
+      )}
 
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
@@ -287,6 +307,180 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div style={{ background: COLORS.S1, border: `1px solid ${COLORS.B2}`, borderRadius: 10, marginBottom: 18 }}>
       <div style={{ padding: "14px 20px", borderBottom: `1px solid ${COLORS.B2}`, fontSize: 14, fontWeight: 600 }}>{title}</div>
       {children}
+    </div>
+  );
+}
+
+// ─── SetPasswordModal ────────────────────────────────────────────────────────
+// Force-set a user's password from Platform Admin. Pre-validates length so
+// the user sees an inline error before the request fires. After success,
+// surfaces per-DB bridge results: a typical success looks "✓ all 3 backends
+// updated" — a partial failure (e.g. user missing from ACQ auth.users)
+// shows which side failed and lets the admin act on it.
+function SetPasswordModal({
+  userId, email, onClose,
+}: { userId: string; email: string; onClose: () => void }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<{
+    acq:       { ok: boolean; error?: string };
+    leadintel: { ok: boolean; error?: string };
+  } | null>(null);
+
+  const tooShort = pw.length > 0 && pw.length < 8;
+  const mismatch = pw2.length > 0 && pw !== pw2;
+  const canSubmit = !busy && !result && pw.length >= 8 && pw === pw2;
+
+  async function submit() {
+    setErr(null);
+    setBusy(true);
+    const r = await adminApi.setUserPassword(userId, pw);
+    setBusy(false);
+    if (!r.ok) { setErr(r.error); return; }
+    setResult(r.data.bridges);
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200,
+      fontFamily: FONT,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: COLORS.S1, border: `1px solid ${COLORS.B3}`,
+        borderRadius: 12, padding: 24, width: 480, maxWidth: "90vw",
+        boxShadow: "0 24px 64px rgba(0,0,0,0.45)",
+      }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Set password</div>
+        <div style={{ fontSize: 12, color: COLORS.T3, marginBottom: 18, wordBreak: "break-all" }}>
+          For <strong style={{ color: COLORS.T2 }}>{email}</strong>. Writes to platform-auth + ACQ + LI in one go.
+        </div>
+
+        {result ? (
+          // Success view — show per-bridge outcome.
+          <>
+            <div style={{
+              padding: "12px 14px", borderRadius: 8, marginBottom: 16,
+              background: "rgba(78,125,61,0.12)", border: `1px solid ${COLORS.GREEN}`,
+              color: COLORS.GREEN, fontSize: 13,
+            }}>
+              ✓ Password updated on platform-auth.
+            </div>
+            {[
+              { name: "ACQ Coach", r: result.acq },
+              { name: "Lead Intel", r: result.leadintel },
+            ].map(({ name, r }) => (
+              <div key={name} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "10px 14px", borderRadius: 6, marginBottom: 8,
+                background: r.ok ? "rgba(78,125,61,0.08)" : "rgba(192,57,43,0.10)",
+                border: `1px solid ${r.ok ? COLORS.GREEN : "#c0392b"}`,
+                fontSize: 12,
+              }}>
+                <span style={{ color: COLORS.TEXT }}>{name}</span>
+                <span style={{ color: r.ok ? COLORS.GREEN : "#c0392b" }}>
+                  {r.ok ? "✓ synced" : `✗ ${r.error || "failed"}`}
+                </span>
+              </div>
+            ))}
+            <div style={{ fontSize: 11, color: COLORS.T3, marginTop: 12, lineHeight: 1.5 }}>
+              User can log in with the new password immediately. Their existing sessions remain valid until natural expiry.
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
+              <button onClick={onClose} style={{
+                background: COLORS.GREEN, border: "none", borderRadius: 6,
+                padding: "8px 18px", color: "#fff", fontSize: 13, fontWeight: 600,
+                cursor: "pointer", fontFamily: FONT,
+              }}>Done</button>
+            </div>
+          </>
+        ) : (
+          // Input view
+          <>
+            <label style={{ display: "block", fontSize: 11, color: COLORS.T3, marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 600 }}>
+              New password
+            </label>
+            <input
+              type={show ? "text" : "password"}
+              value={pw}
+              onChange={e => setPw(e.target.value)}
+              placeholder="At least 8 characters"
+              autoFocus
+              style={{
+                width: "100%", padding: "10px 12px", boxSizing: "border-box",
+                background: COLORS.BG, border: `1px solid ${tooShort ? "#c0392b" : COLORS.B3}`,
+                borderRadius: 6, color: COLORS.TEXT, fontSize: 14,
+                fontFamily: "ui-monospace, monospace", marginBottom: 4,
+              }}
+            />
+            {tooShort && (
+              <div style={{ fontSize: 11, color: "#c0392b", marginBottom: 8 }}>
+                Too short — minimum 8 characters.
+              </div>
+            )}
+
+            <label style={{ display: "block", fontSize: 11, color: COLORS.T3, marginTop: 14, marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 600 }}>
+              Confirm password
+            </label>
+            <input
+              type={show ? "text" : "password"}
+              value={pw2}
+              onChange={e => setPw2(e.target.value)}
+              placeholder="Type it again"
+              style={{
+                width: "100%", padding: "10px 12px", boxSizing: "border-box",
+                background: COLORS.BG, border: `1px solid ${mismatch ? "#c0392b" : COLORS.B3}`,
+                borderRadius: 6, color: COLORS.TEXT, fontSize: 14,
+                fontFamily: "ui-monospace, monospace", marginBottom: 4,
+              }}
+            />
+            {mismatch && (
+              <div style={{ fontSize: 11, color: "#c0392b", marginBottom: 8 }}>
+                Passwords don't match.
+              </div>
+            )}
+
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: COLORS.T3, marginTop: 10, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={show}
+                onChange={e => setShow(e.target.checked)}
+                style={{ cursor: "pointer" }}
+              />
+              Show password
+            </label>
+
+            {err && (
+              <div style={{
+                marginTop: 12, padding: "10px 12px", borderRadius: 6,
+                background: "rgba(192,57,43,0.10)", border: "1px solid #c0392b",
+                color: "#ff7a7a", fontSize: 12,
+              }}>{err}</div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
+              <button onClick={onClose} disabled={busy} style={{
+                background: "transparent", border: `1px solid ${COLORS.B3}`,
+                borderRadius: 6, padding: "8px 14px", color: COLORS.T2,
+                fontSize: 13, cursor: busy ? "not-allowed" : "pointer", fontFamily: FONT,
+              }}>Cancel</button>
+              <button onClick={submit} disabled={!canSubmit} style={{
+                background: canSubmit ? COLORS.GREEN : COLORS.B2,
+                border: "none", borderRadius: 6, padding: "8px 18px",
+                color: canSubmit ? "#fff" : COLORS.T3,
+                fontSize: 13, fontWeight: 600,
+                cursor: canSubmit ? "pointer" : "not-allowed", fontFamily: FONT,
+                minWidth: 140,
+              }}>
+                {busy ? "Saving…" : "Set password"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -213,6 +213,23 @@ export const adminApi = {
     })),
   listUsers:        (q = "") => jsonOr<{ users: UserRow[]; count: number }>(fetch(`${BASE}/users?q=${encodeURIComponent(q)}`, { headers: authHeader() })),
   getUser:          (id: string) => jsonOr<UserDetail>(fetch(`${BASE}/users/${id}`, { headers: authHeader() })),
+  // Admin-side password reset — bcrypts and writes encrypted_password across
+  // platform-db + ACQ + LI auth.users in one call. Response surfaces per-DB
+  // bridge results so the UI can flag partial failures.
+  setUserPassword:  (id: string, password: string) =>
+    jsonOr<{
+      ok: true;
+      user_id: string;
+      bridges: {
+        acq:       { ok: boolean; error?: string };
+        leadintel: { ok: boolean; error?: string };
+      };
+      note: string;
+    }>(fetch(`${BASE}/users/${id}/password`, {
+      method: "POST",
+      headers: { ...authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    })),
   // Per-user access toggles were removed. Access derives from customer membership
   // — manage on the Customers page. setUserAccess removed.
   setupStatus: (id: string) => jsonOr<{

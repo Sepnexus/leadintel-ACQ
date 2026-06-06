@@ -9,6 +9,7 @@ import "./db.ts"; // boots the connection pool + fail-fast check
 
 import { listCustomers, getCustomer, setCustomerAccess, updateCustomer, createCustomer, syncMemberships } from "./routes/customers.ts";
 import { listUsers, getUser } from "./routes/users.ts";
+import { setUserPassword } from "./routes/users-password.ts";
 import { listAudit } from "./routes/audit.ts";
 import { setGhlCredentials, revealGhlToken, validateGhlCredentials } from "./routes/ghl-credentials.ts";
 import { listPlatformKeys } from "./routes/platform-settings.ts";
@@ -47,6 +48,7 @@ const routes: Route[] = [
   { method: "POST",  pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/ghl\/validate\/?$/, handler: validateGhlCredentials },
   { method: "GET",   pattern: /^\/admin-api\/users\/?$/,                  handler: listUsers },
   { method: "GET",   pattern: /^\/admin-api\/users\/([0-9a-f-]+)\/?$/,     handler: getUser },
+  { method: "POST",  pattern: /^\/admin-api\/users\/([0-9a-f-]+)\/password\/?$/, handler: setUserPassword },
   { method: "GET",   pattern: /^\/admin-api\/audit\/?$/,                  handler: listAudit },
   { method: "GET",   pattern: /^\/admin-api\/platform-settings\/keys\/?$/, handler: listPlatformKeys },
   { method: "GET",    pattern: /^\/admin-api\/platform-settings\/master-keys\/?$/,             handler: listMasterKeys },
