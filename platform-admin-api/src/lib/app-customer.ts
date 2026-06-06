@@ -10,7 +10,7 @@
 // (for every product enabled at creation time) and from setCustomerAccess
 // (when an admin flips a product on later).
 
-import { sql, acqSql, liSql } from "../db.ts";
+import { sql, acqSql, liSql, TOKEN_KEY } from "../db.ts";
 
 type Product = "acq_coach" | "lead_intel";
 
@@ -25,6 +25,26 @@ interface Cust {
   demo_mode: boolean;
   trial_active: boolean;
   trial_expires_at: string | null;
+  has_token: boolean;
+}
+
+// If a token was set on platform BEFORE the app row existed, decrypt it now
+// so the new ACQ ghl_accounts.api_key / LI tenants.ghl_pit_token can be
+// seeded with the real value instead of the placeholder. Returns null if
+// no token, decryption unavailable, or any error (we fall back to
+// placeholder + the user can re-set the token via the admin UI).
+async function decryptPlatformToken(customerId: string): Promise<string | null> {
+  if (!TOKEN_KEY) return null;
+  try {
+    const rows = await sql<{ token: string | null }[]>`
+      SELECT platform.get_ghl_pit_token(${customerId}::uuid, ${TOKEN_KEY}) AS token
+    `;
+    const t = rows[0]?.token;
+    return t && t.length > 0 ? t : null;
+  } catch (e) {
+    console.warn("[ensureAppCustomerRow] token decrypt failed:", (e as Error).message);
+    return null;
+  }
 }
 
 export async function ensureAppCustomerRow(
@@ -34,11 +54,17 @@ export async function ensureAppCustomerRow(
   const rows = await sql<Cust[]>`
     SELECT id, name, ghl_location_id, ghl_company_id,
            acq_account_id, leadintel_tenant_id,
-           is_test, demo_mode, trial_active, trial_expires_at
+           is_test, demo_mode, trial_active, trial_expires_at,
+           (ghl_pit_token_encrypted IS NOT NULL) AS has_token
     FROM platform.customers WHERE id = ${customerId}::uuid
   `;
   if (rows.length === 0) return { ok: false, error: "customer not found" };
   const c = rows[0];
+
+  // Seed token: if the token was set on platform BEFORE the app row existed,
+  // we pull and decrypt it once here so the new app row gets the real token
+  // instead of a placeholder. Falls back to placeholder/null on any failure.
+  const seedToken = c.has_token ? await decryptPlatformToken(customerId) : null;
 
   if (product === "acq_coach") {
     if (c.acq_account_id) return { ok: true, existed: true, app_id: c.acq_account_id };
@@ -46,15 +72,15 @@ export async function ensureAppCustomerRow(
 
     try {
       // ACQ ghl_accounts has NOT NULL on api_key + location_id. We seed both
-      // with placeholders so the row is creatable BEFORE the admin sets a
-      // real PIT token. The bridge-write in setGhlCredentials populates
-      // api_key when the token is set.
+      // with the real token + location if known, else placeholders so the
+      // row is creatable BEFORE the admin sets credentials. The bridge-write
+      // in setGhlCredentials updates the row if it pre-exists.
       const inserted = await acqSql<{ id: string }[]>`
         INSERT INTO public.ghl_accounts (
           name, api_key, location_id, company_id, is_active, is_test, demo_mode
         ) VALUES (
           ${c.name},
-          ${"PENDING_TOKEN_SETUP"},
+          ${seedToken ?? "PENDING_TOKEN_SETUP"},
           ${c.ghl_location_id ?? "PENDING"},
           ${c.ghl_company_id ?? ""},
           true,
@@ -77,13 +103,17 @@ export async function ensureAppCustomerRow(
 
     try {
       // billing_mode check constraint accepts only 'closer_control' | 'tenant'.
+      // Seed ghl_pit_token with the real token if one already exists on
+      // platform side — otherwise leave NULL and the admin's token-set flow
+      // will fill it via setGhlCredentials' bridge-write.
       const inserted = await liSql<{ id: string }[]>`
         INSERT INTO public.tenants (
-          name, ghl_location_id, status, plan_type, billing_mode,
+          name, ghl_location_id, ghl_pit_token, status, plan_type, billing_mode,
           trial_active, trial_expires_at
         ) VALUES (
           ${c.name},
           ${c.ghl_location_id},
+          ${seedToken},
           ${"active"},
           ${"standard"},
           ${"tenant"},

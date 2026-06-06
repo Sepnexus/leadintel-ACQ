@@ -13,11 +13,35 @@ export function SetupChecklistCard({ customerId }: { customerId: string }) {
   const [steps, setSteps] = useState<Step[]>([]);
   const [allDone, setAllDone] = useState(false);
   const [loading, setLoading] = useState(true);
+  // refreshState: idle on first paint, "refreshing" while a manual fetch is
+  // in flight, "ok" / "err" briefly afterward so the user sees feedback.
+  const [refreshState, setRefreshState] = useState<"idle" | "refreshing" | "ok" | "err">("idle");
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
 
-  async function load() {
-    const r = await adminApi.setupStatus(customerId);
-    if (r.ok) { setSteps(r.data.steps); setAllDone(r.data.all_done); }
-    setLoading(false);
+  async function load(manual = false) {
+    if (manual) setRefreshState("refreshing");
+    try {
+      const r = await adminApi.setupStatus(customerId);
+      if (r.ok) {
+        setSteps(r.data.steps);
+        setAllDone(r.data.all_done);
+        setLastRefreshedAt(Date.now());
+        if (manual) {
+          setRefreshState("ok");
+          setTimeout(() => setRefreshState("idle"), 1500);
+        }
+      } else if (manual) {
+        setRefreshState("err");
+        setTimeout(() => setRefreshState("idle"), 2200);
+      }
+    } catch {
+      if (manual) {
+        setRefreshState("err");
+        setTimeout(() => setRefreshState("idle"), 2200);
+      }
+    } finally {
+      setLoading(false);
+    }
   }
   useEffect(() => {
     load();
@@ -28,6 +52,17 @@ export function SetupChecklistCard({ customerId }: { customerId: string }) {
   if (loading && steps.length === 0) return null;
 
   const doneCount = steps.filter(s => s.done).length;
+  const refreshLabel =
+    refreshState === "refreshing" ? "⏳ Refreshing…" :
+    refreshState === "ok"         ? "✓ Updated"     :
+    refreshState === "err"        ? "⚠ Failed"      :
+    "↻ Refresh";
+  const refreshDisabled = refreshState === "refreshing";
+  const fmtAgo = (ts: number | null) => {
+    if (!ts) return "";
+    const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    return s < 5 ? "just now" : s < 60 ? `${s}s ago` : `${Math.round(s / 60)}m ago`;
+  };
 
   return (
     <div style={{
@@ -44,12 +79,38 @@ export function SetupChecklistCard({ customerId }: { customerId: string }) {
             {allDone
               ? "✓ All onboarding steps complete. Customer is fully wired."
               : `${doneCount} of ${steps.length} steps complete. Polling every 8s while sync runs.`}
+            {lastRefreshedAt && (
+              <span style={{ marginLeft: 8, color: COLORS.T3 }}>
+                · Last checked {fmtAgo(lastRefreshedAt)}
+              </span>
+            )}
           </div>
         </div>
-        <button onClick={load} style={{
-          background: COLORS.B2, border: `1px solid ${COLORS.B3}`, borderRadius: 6,
-          padding: "6px 12px", color: COLORS.T2, fontSize: 12, cursor: "pointer",
-        }}>↻ Refresh</button>
+        <button
+          onClick={() => load(true)}
+          disabled={refreshDisabled}
+          style={{
+            background:
+              refreshState === "ok"  ? "rgba(78,125,61,0.18)" :
+              refreshState === "err" ? "rgba(192,57,43,0.18)" :
+              COLORS.B2,
+            border: `1px solid ${
+              refreshState === "ok"  ? COLORS.GREEN :
+              refreshState === "err" ? "#c0392b" :
+              COLORS.B3}`,
+            borderRadius: 6,
+            padding: "6px 12px",
+            color:
+              refreshState === "ok"  ? COLORS.GREEN :
+              refreshState === "err" ? "#c0392b" :
+              COLORS.T2,
+            fontSize: 12,
+            cursor: refreshDisabled ? "wait" : "pointer",
+            opacity: refreshDisabled ? 0.75 : 1,
+            minWidth: 110,
+            transition: "all 0.2s ease",
+          }}
+        >{refreshLabel}</button>
       </div>
       {steps.map((s, i) => (
         <div key={s.id} style={{

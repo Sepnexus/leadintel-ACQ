@@ -63,10 +63,41 @@ export async function setGhlCredentials(req: Request, admin: AuthedAdmin, id: st
       )
     `;
 
-    // Bridge writes
+    // Auto-fetch ghl_company_id from GHL if missing — required by ACQ's
+    // /users/search endpoint which 422s on empty companyId. Best-effort.
+    // Also caches whatever location_id was effectively used so future bridges
+    // pick it up. Failure here doesn't block token-set.
+    let fetchedCompanyId: string | null = null;
+    const locForCompany = (wantsLoc ? body.location_id?.trim() : null) ?? customer.ghl_location_id;
+    if (locForCompany) {
+      try {
+        const r = await fetch(
+          `https://services.leadconnectorhq.com/locations/${encodeURIComponent(locForCompany)}`,
+          { headers: { Authorization: `Bearer ${token}`, Version: "2021-07-28" } },
+        );
+        if (r.ok) {
+          const d = await r.json().catch(() => null) as { location?: { companyId?: string } } | null;
+          const cid = d?.location?.companyId?.trim();
+          if (cid && cid.length > 0) {
+            fetchedCompanyId = cid;
+            await sql`UPDATE platform.customers SET ghl_company_id = ${cid} WHERE id = ${id}::uuid`;
+          }
+        } else {
+          console.warn(`[admin-api] GHL /locations probe returned ${r.status} for ${locForCompany} (token last4 ${token_last_4})`);
+        }
+      } catch (e) {
+        console.warn("[admin-api] GHL company_id auto-fetch warn:", (e as Error).message);
+      }
+    }
+
+    // Bridge writes — propagate token + freshly-fetched company_id to each app.
     if (customer.acq_account_id && acqSql) {
       try {
-        await acqSql`UPDATE ghl_accounts SET api_key = ${token} WHERE id = ${customer.acq_account_id}::uuid`;
+        if (fetchedCompanyId) {
+          await acqSql`UPDATE ghl_accounts SET api_key = ${token}, company_id = ${fetchedCompanyId} WHERE id = ${customer.acq_account_id}::uuid`;
+        } else {
+          await acqSql`UPDATE ghl_accounts SET api_key = ${token} WHERE id = ${customer.acq_account_id}::uuid`;
+        }
       } catch (e) {
         console.error("[admin-api] bridge write to acq failed:", (e as Error).message);
       }
