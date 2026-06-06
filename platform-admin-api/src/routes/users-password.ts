@@ -31,19 +31,19 @@ import bcrypt from "npm:bcryptjs@2.4.3";
 
 interface BridgeResult { ok: boolean; created?: boolean; error?: string }
 
-// Upsert a user into a GoTrue auth.users table with the supplied hash.
-// On UPDATE: just bumps encrypted_password + updated_at.
-// On INSERT: provisions the minimal columns GoTrue needs for /token grant
-// to succeed — aud/role = 'authenticated', email_confirmed_at = now() so
-// the user can log in immediately without an email-confirmation step.
+// Upsert a user's password via the auth.admin_upsert_user_password()
+// SECURITY DEFINER function (installed by migration 12-admin-set-password
+// on platform-db and 20260606150000_admin_upsert_user_password on each
+// app DB). We can't write to auth.users directly — GoTrue restricts those
+// tables to read-only for every role except supabase_auth_admin. The
+// function is owned by supabase_auth_admin so SECURITY DEFINER picks up
+// the rights it needs; EXECUTE is granted only to the role each
+// connection uses (platform_admin / postgres).
 //
-// Why INSERT here? Two paths trigger missing rows:
-//   1) "team_member_invited" flow creates platform.users but NOT auth.users
-//      (the password hasn't been chosen yet — there's no row to write).
-//   2) A user was provisioned on platform-auth but never visited ACQ/LI,
-//      so they exist on platform but not on the app DBs.
-// In both cases, an admin setting the password is effectively *completing
-// the signup*, so creating the row is the right behaviour.
+// Function returns:
+//   'updated'   — existing auth.users row was patched
+//   'created'   — fresh row was provisioned (invited-but-not-onboarded)
+//   'not_found' — only happens if we ever pass create_if_missing=false
 async function upsertAuthUser(
   db: any,
   userId: string,
@@ -52,43 +52,15 @@ async function upsertAuthUser(
 ): Promise<BridgeResult> {
   if (!db) return { ok: false, error: "bridge_unavailable" };
   try {
-    // Try UPDATE first
-    const updated = await db`
-      UPDATE auth.users
-      SET encrypted_password = ${hash}, updated_at = now()
-      WHERE id = ${userId}::uuid
-      RETURNING id
+    const rows = await db<{ result: string }[]>`
+      SELECT auth.admin_upsert_user_password(
+        ${userId}::uuid, ${email}, ${hash}, true
+      ) AS result
     `;
-    if (updated.length > 0) return { ok: true, created: false };
-
-    // No row — INSERT the minimal GoTrue row. instance_id is the historical
-    // multi-tenant nullable column; we use the conventional zero-UUID that
-    // every single-tenant supabase install uses.
-    await db`
-      INSERT INTO auth.users (
-        instance_id, id, aud, role, email, encrypted_password,
-        email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
-        created_at, updated_at, is_sso_user, is_anonymous
-      ) VALUES (
-        '00000000-0000-0000-0000-000000000000'::uuid,
-        ${userId}::uuid,
-        'authenticated',
-        'authenticated',
-        ${email},
-        ${hash},
-        now(),
-        ${db.json({ provider: "email", providers: ["email"] })},
-        ${db.json({})},
-        now(),
-        now(),
-        false,
-        false
-      )
-      ON CONFLICT (id) DO UPDATE
-        SET encrypted_password = EXCLUDED.encrypted_password,
-            updated_at = now()
-    `;
-    return { ok: true, created: true };
+    const result = rows[0]?.result;
+    if (result === "updated") return { ok: true, created: false };
+    if (result === "created") return { ok: true, created: true };
+    return { ok: false, error: result ?? "unknown_result" };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
