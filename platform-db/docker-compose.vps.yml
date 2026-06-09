@@ -1,0 +1,21 @@
+# VPS overlay for platform-db.
+#
+# Platform-db is INTERNAL ONLY. It must never be reachable from the public
+# internet (this is your identity + entitlement + audit DB — exposing it
+# would be a privilege-escalation nightmare). No host port binding, no
+# Traefik labels. Only sibling services on `root_default` can reach it.
+#
+# Apply with:
+#   docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+
+services:
+  platform-db:
+    # !override removes the host port mapping (54432:5432) from base compose,
+    # so postgres is reachable only via the docker network — never from outside.
+    ports: !override []
+    networks:
+      - root_default
+
+networks:
+  root_default:
+    external: true

@@ -1,0 +1,20 @@
+# VPS overlay for platform-admin-api.
+#
+# Admin-api is INTERNAL ONLY. The launcher reaches it via nginx proxy at
+# /admin-api/* (already wired up in launcher's nginx.conf). No public surface,
+# no Traefik labels, no host ports.
+#
+# Apply with:
+#   docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+
+services:
+  platform-admin-api:
+    # Base compose has no host port mapping (only the container's 8080), so
+    # there's nothing to override — just join the public-ish network so the
+    # launcher nginx can resolve `http://platform-admin-api:8080`.
+    networks:
+      - root_default
+
+networks:
+  root_default:
+    external: true

@@ -1,0 +1,83 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Sepnexus Platform — top-level VPS orchestrator
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Brings up all 8 services on a single VPS that already runs Traefik on the
+# `root_default` network (same setup as iBuyKC dashboards on the same box).
+#
+# This file ONLY lists the compose files to merge. It carries no service
+# definitions of its own — those live in each project's docker-compose.yml
+# plus the docker-compose.vps.yml overlay. Docker Compose 2.x supports
+# `include` so the actual `docker compose up` runs against the merged
+# multi-file view.
+#
+# Public surface on the VPS:
+#   - app.sepnexus.com         → launcher (HQ login, Dashboard, Admin)
+#   - acq.sepnexus.com         → ACQ Coach web
+#   - acq-api.sepnexus.com     → ACQ Supabase gateway
+#   - leadintel.sepnexus.com   → Lead Intel web
+#   - leadintel-api.sepnexus.com → LI Supabase gateway
+#
+# Same-origin proxy through launcher's nginx:
+#   - app.sepnexus.com/auth/*      → platform-auth (internal)
+#   - app.sepnexus.com/admin-api/* → platform-admin-api (internal)
+#
+# Internal-only (never exposed):
+#   - platform-db
+#   - platform-auth
+#   - platform-admin-api
+#
+# ─── Usage ───────────────────────────────────────────────────────────────────
+#
+# First-time deploy on the VPS:
+#   1. clone the repo into /root/sepnexus-platform
+#   2. cp .env.vps.example .env.vps
+#   3. bash scripts/gen-vps-secrets.sh  (prints values to paste into .env.vps)
+#   4. fill .env.vps with values, save
+#   5. docker compose --env-file .env.vps -f docker-compose.vps.yml up -d --build
+#
+# Subsequent updates:
+#   1. git pull
+#   2. docker compose --env-file .env.vps -f docker-compose.vps.yml up -d --build
+#
+# See VPS-DEPLOY.md for the full step-by-step.
+
+include:
+  # Order matters at first boot:
+  #   platform-db must be up before platform-auth (GoTrue migrations run on start)
+  #   platform-db + platform-auth before admin-api (it reads from both)
+  #   admin-api before launcher (launcher nginx proxies to it)
+  #   ACQ + LI can come up in any order after platform-db has its schema
+  - path:
+      - platform-db/docker-compose.yml
+      - platform-db/docker-compose.vps.yml
+    project_directory: ./platform-db
+
+  - path:
+      - platform-auth/docker-compose.yml
+      - platform-auth/docker-compose.vps.yml
+    project_directory: ./platform-auth
+
+  - path:
+      - platform-admin-api/docker-compose.yml
+      - platform-admin-api/docker-compose.vps.yml
+    project_directory: ./platform-admin-api
+
+  - path:
+      - platform-launcher/docker-compose.yml
+      - platform-launcher/docker-compose.vps.yml
+    project_directory: ./platform-launcher
+
+  - path:
+      - acq-coach-selfhost/docker-compose.yml
+      - acq-coach-selfhost/docker-compose.vps.yml
+    project_directory: ./acq-coach-selfhost
+
+  - path:
+      - leadintel-selfhost/docker-compose.yml
+      - leadintel-selfhost/docker-compose.vps.yml
+    project_directory: ./leadintel-selfhost
+
+networks:
+  root_default:
+    external: true

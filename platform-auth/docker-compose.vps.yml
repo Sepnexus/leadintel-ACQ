@@ -1,0 +1,27 @@
+# VPS overlay for platform-auth (GoTrue v2).
+#
+# Same-origin proxy pattern: the browser hits https://app.sepnexus.com/auth/*,
+# the launcher's nginx forwards to platform-auth:9999 over the docker network.
+# Platform-auth never needs its own subdomain or Traefik labels — that's the
+# whole point of doing the proxy in launcher's nginx. Keeps the cert surface
+# small and avoids a CORS dance.
+#
+# Apply with the project's compose:
+#   docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+
+services:
+  platform-auth:
+    # Drop the host port (9998:9999) — only reachable via root_default now.
+    ports: !override []
+    networks:
+      - root_default
+    # Tell GoTrue the public base URL it's mounted at (important for password-
+    # reset links + email-verification links that the user clicks). Same-origin
+    # proxy means the public URL is app.sepnexus.com/auth, not auth.sepnexus.com.
+    environment:
+      GOTRUE_SITE_URL:       "${PLATFORM_AUTH_PUBLIC_URL:-https://app.sepnexus.com}"
+      GOTRUE_API_EXTERNAL_URL: "${PLATFORM_AUTH_PUBLIC_URL:-https://app.sepnexus.com}/auth"
+
+networks:
+  root_default:
+    external: true

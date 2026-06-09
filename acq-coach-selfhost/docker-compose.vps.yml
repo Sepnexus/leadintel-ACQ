@@ -1,5 +1,14 @@
 # VPS overlay — add Traefik routing + use the existing root_default network.
-# Apply with: docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+#
+# Two ways to apply:
+#
+# 1. Solo (legacy / standalone): from acq-coach-selfhost/, with PUBLIC_HOST
+#    + PUBLIC_API_HOST set in this project's .env. Single-project deploy.
+#       docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+#
+# 2. Whole platform (preferred): from the repo root via docker-compose.vps.yml
+#    with .env.vps providing ACQ_HOST / ACQ_API_HOST. The `${ACQ_HOST:-${PUBLIC_HOST}}`
+#    chain means top-level vars win when set, with the old solo names as fallback.
 
 services:
   acq-coach:
@@ -9,13 +18,13 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=root_default"
-      - "traefik.http.routers.acq-app.rule=Host(`${PUBLIC_HOST}`)"
+      - "traefik.http.routers.acq-app.rule=Host(`${ACQ_HOST:-${PUBLIC_HOST}}`)"
       - "traefik.http.routers.acq-app.entrypoints=web,websecure"
       - "traefik.http.routers.acq-app.tls=true"
       - "traefik.http.routers.acq-app.tls.certresolver=mytlschallenge"
       - "traefik.http.routers.acq-app.service=acq-app-svc"
       - "traefik.http.services.acq-app-svc.loadbalancer.server.port=3000"
-      - "traefik.http.routers.acq-api.rule=Host(`${PUBLIC_API_HOST}`)"
+      - "traefik.http.routers.acq-api.rule=Host(`${ACQ_API_HOST:-${PUBLIC_API_HOST}}`)"
       - "traefik.http.routers.acq-api.entrypoints=web,websecure"
       - "traefik.http.routers.acq-api.tls=true"
       - "traefik.http.routers.acq-api.tls.certresolver=mytlschallenge"

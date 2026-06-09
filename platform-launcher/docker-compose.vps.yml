@@ -1,0 +1,45 @@
+# VPS overlay for platform-launcher.
+#
+# The launcher is the ONLY publicly-routable platform-* service. It hosts:
+#   - the React SPA (HQ login, Dashboard, Account, Platform Admin)
+#   - nginx that proxies /admin-api/* → platform-admin-api:8080
+#   - nginx that proxies /auth/*       → platform-auth:9999
+#
+# So `app.sepnexus.com` is the SINGLE public surface for all platform
+# functionality. Auth + admin-api ride along on the same domain — no extra
+# subdomains, no CORS, no cookie-domain headaches.
+#
+# Apply:
+#   docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+
+services:
+  launcher:
+    # Drop the host port (8080:80); Traefik handles inbound.
+    ports: !override []
+    networks:
+      - root_default
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=root_default"
+      - "traefik.http.routers.launcher.rule=Host(`${LAUNCHER_HOST:-app.sepnexus.com}`)"
+      - "traefik.http.routers.launcher.entrypoints=web,websecure"
+      - "traefik.http.routers.launcher.tls=true"
+      - "traefik.http.routers.launcher.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.launcher.service=launcher-svc"
+      - "traefik.http.services.launcher-svc.loadbalancer.server.port=80"
+    # Inject the production URLs into entrypoint.sh so config.json points the
+    # browser at the right backends.
+    environment:
+      ACQ_URL:           "${ACQ_URL:-https://acq.sepnexus.com}"
+      ACQ_API_URL:       "${ACQ_API_URL:-https://acq-api.sepnexus.com}"
+      ACQ_ANON_KEY:      "${ACQ_ANON_KEY}"
+      LEADINTEL_URL:     "${LEADINTEL_URL:-https://leadintel.sepnexus.com}"
+      LEADINTEL_API_URL: "${LEADINTEL_API_URL:-https://leadintel-api.sepnexus.com}"
+      LEADINTEL_ANON_KEY: "${LEADINTEL_ANON_KEY}"
+      # Same-origin proxy: browser hits https://app.sepnexus.com/auth/*,
+      # nginx forwards to platform-auth on the internal network.
+      PLATFORM_AUTH_URL: "${PLATFORM_AUTH_URL:-https://${LAUNCHER_HOST:-app.sepnexus.com}/auth}"
+
+networks:
+  root_default:
+    external: true

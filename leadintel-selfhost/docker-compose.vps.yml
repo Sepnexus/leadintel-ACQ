@@ -1,4 +1,21 @@
 # VPS overlay — Traefik routing + root_default external network.
+#
+# ⚠️ DATA SAFETY: Recreating this `leadintel` container WIPES THE DATABASE
+# (start.sh re-initializes Postgres on every fresh container start). See
+# CLAUDE.md in this directory for the safe code-only-update recipe. For VPS
+# first boot this is fine — there is no data yet. For subsequent updates,
+# DO NOT `docker compose up -d --build leadintel`; use the hot-copy recipe.
+#
+# Two ways to apply:
+#
+# 1. Solo (legacy): from leadintel-selfhost/, PUBLIC_HOST + PUBLIC_API_HOST
+#    set in this dir's .env.
+#       docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d --build
+#
+# 2. Whole platform: from the repo root via docker-compose.vps.yml using
+#    .env.vps's LEADINTEL_HOST / LEADINTEL_API_HOST. The fallback chain below
+#    keeps the solo path working.
+
 services:
   leadintel:
     ports: !override []
@@ -7,13 +24,13 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=root_default"
-      - "traefik.http.routers.li-app.rule=Host(`${PUBLIC_HOST}`)"
+      - "traefik.http.routers.li-app.rule=Host(`${LEADINTEL_HOST:-${PUBLIC_HOST}}`)"
       - "traefik.http.routers.li-app.entrypoints=web,websecure"
       - "traefik.http.routers.li-app.tls=true"
       - "traefik.http.routers.li-app.tls.certresolver=mytlschallenge"
       - "traefik.http.routers.li-app.service=li-app-svc"
       - "traefik.http.services.li-app-svc.loadbalancer.server.port=3000"
-      - "traefik.http.routers.li-api.rule=Host(`${PUBLIC_API_HOST}`)"
+      - "traefik.http.routers.li-api.rule=Host(`${LEADINTEL_API_HOST:-${PUBLIC_API_HOST}}`)"
       - "traefik.http.routers.li-api.entrypoints=web,websecure"
       - "traefik.http.routers.li-api.tls=true"
       - "traefik.http.routers.li-api.tls.certresolver=mytlschallenge"
