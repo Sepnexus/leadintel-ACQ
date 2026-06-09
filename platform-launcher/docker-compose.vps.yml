@@ -21,7 +21,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=root_default"
-      - "traefik.http.routers.launcher.rule=Host(`${LAUNCHER_HOST:-app.sepnexus.com}`)"
+      - "traefik.http.routers.launcher.rule=Host(`${LAUNCHER_HOST:-closercontrol.srv844822.hstgr.cloud}`)"
       - "traefik.http.routers.launcher.entrypoints=web,websecure"
       - "traefik.http.routers.launcher.tls=true"
       - "traefik.http.routers.launcher.tls.certresolver=mytlschallenge"
@@ -30,15 +30,15 @@ services:
     # Inject the production URLs into entrypoint.sh so config.json points the
     # browser at the right backends.
     environment:
-      ACQ_URL:           "${ACQ_URL:-https://acq.sepnexus.com}"
-      ACQ_API_URL:       "${ACQ_API_URL:-https://acq-api.sepnexus.com}"
+      ACQ_URL:           "${ACQ_URL:-https://acq.srv844822.hstgr.cloud}"
+      ACQ_API_URL:       "${ACQ_API_URL:-https://api-acq.srv844822.hstgr.cloud}"
       ACQ_ANON_KEY:      "${ACQ_ANON_KEY}"
-      LEADINTEL_URL:     "${LEADINTEL_URL:-https://leadintel.sepnexus.com}"
-      LEADINTEL_API_URL: "${LEADINTEL_API_URL:-https://leadintel-api.sepnexus.com}"
+      LEADINTEL_URL:     "${LEADINTEL_URL:-https://leadintel.srv844822.hstgr.cloud}"
+      LEADINTEL_API_URL: "${LEADINTEL_API_URL:-https://api-leadintel.srv844822.hstgr.cloud}"
       LEADINTEL_ANON_KEY: "${LEADINTEL_ANON_KEY}"
-      # Same-origin proxy: browser hits https://app.sepnexus.com/auth/*,
+      # Same-origin proxy: browser hits LAUNCHER_HOST/auth/*,
       # nginx forwards to platform-auth on the internal network.
-      PLATFORM_AUTH_URL: "${PLATFORM_AUTH_URL:-https://${LAUNCHER_HOST:-app.sepnexus.com}/auth}"
+      PLATFORM_AUTH_URL: "${PLATFORM_AUTH_URL:-https://${LAUNCHER_HOST:-closercontrol.srv844822.hstgr.cloud}/auth}"
 
 networks:
   root_default:

@@ -19,8 +19,8 @@ services:
     # reset links + email-verification links that the user clicks). Same-origin
     # proxy means the public URL is app.sepnexus.com/auth, not auth.sepnexus.com.
     environment:
-      GOTRUE_SITE_URL:       "${PLATFORM_AUTH_PUBLIC_URL:-https://app.sepnexus.com}"
-      GOTRUE_API_EXTERNAL_URL: "${PLATFORM_AUTH_PUBLIC_URL:-https://app.sepnexus.com}/auth"
+      GOTRUE_SITE_URL:       "${PLATFORM_AUTH_PUBLIC_URL:-https://${LAUNCHER_HOST:-closercontrol.srv844822.hstgr.cloud}}"
+      GOTRUE_API_EXTERNAL_URL: "${PLATFORM_AUTH_PUBLIC_URL:-https://${LAUNCHER_HOST:-closercontrol.srv844822.hstgr.cloud}}/auth"
 
 networks:
   root_default:

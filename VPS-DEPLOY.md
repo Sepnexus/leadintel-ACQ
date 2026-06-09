@@ -2,7 +2,7 @@
 
 All 8 services on the existing `srv844822.hstgr.cloud` box, sharing the
 existing Traefik on `root_default` (same setup as iBuyKC dashboards). One
-public domain — `app.sepnexus.com` — fronts the launcher, with `/auth` and
+public domain — `closercontrol.srv844822.hstgr.cloud` — fronts the launcher, with `/auth` and
 `/admin-api` proxied through to the internal-only platform services.
 
 ---
@@ -10,36 +10,27 @@ public domain — `app.sepnexus.com` — fronts the launcher, with `/auth` and
 ## Prerequisites
 
 - SSH access to `root@srv844822.hstgr.cloud`
-- DNS control for `sepnexus.com` (you'll add 5 A records)
 - Docker + docker compose v2 already on the VPS (they are — iBuyKC uses them)
 - Traefik already running on `root_default` (it is — same network)
 
----
+> **No DNS changes needed.** All five subdomains live under
+> `*.srv844822.hstgr.cloud` — Hostinger's built-in wildcard that already
+> resolves to the VPS. Traefik on the box already issues certs for the
+> wildcard (same setup iBuyKC dashboards use). Skip straight to Step 1.
 
-## Step 1 — DNS records (do this first; cert issuance needs DNS resolving)
-
-Point five subdomains at the VPS IP `93.127.194.153`:
-
-```
-A   app.sepnexus.com            → 93.127.194.153
-A   acq.sepnexus.com            → 93.127.194.153
-A   acq-api.sepnexus.com        → 93.127.194.153
-A   leadintel.sepnexus.com      → 93.127.194.153
-A   leadintel-api.sepnexus.com  → 93.127.194.153
-```
-
-Wait 5 minutes for DNS to propagate, then verify:
+If you want to verify the wildcard resolves before you start (from your
+laptop, before SSH-ing in):
 
 ```bash
-for h in app acq acq-api leadintel leadintel-api; do
-  dig +short $h.sepnexus.com
+for h in closercontrol acq api-acq leadintel api-leadintel; do
+  dig +short $h.srv844822.hstgr.cloud
 done
-# All should return 93.127.194.153
+# All should return the same VPS IP (93.127.194.153).
 ```
 
 ---
 
-## Step 2 — On the VPS: clone repo + generate secrets
+## Step 1 — On the VPS: clone repo + generate secrets
 
 ```bash
 ssh root@srv844822.hstgr.cloud
@@ -66,7 +57,7 @@ ACQ_POSTGRES_PASSWORD=...
 
 ---
 
-## Step 3 — Create `.env.vps`
+## Step 2 — Create `.env.vps`
 
 ```bash
 cp .env.vps.example .env.vps
@@ -76,7 +67,7 @@ nano .env.vps
 In nano:
 
 1. The first block (`LAUNCHER_HOST`, `ACQ_HOST`, etc.) — leave defaults if you want
-   the `.sepnexus.com` subdomains. Change if you want different hostnames.
+   the default `*.srv844822.hstgr.cloud` subdomains. Change if you want different hostnames.
 2. **Replace all the `PASTE_FROM_GEN_SECRETS` lines** with the block from Step 2
    (paste the whole block; the placeholder lines get overwritten).
 3. Fill `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `OPENAI_API_KEY`,
@@ -89,7 +80,7 @@ Save: `Ctrl+O`, Enter, `Ctrl+X`.
 
 ---
 
-## Step 4 — Pre-flight (30 sec)
+## Step 3 — Pre-flight (30 sec)
 
 ```bash
 echo "--- existing containers (iBuyKC + Traefik should be here) ---"
@@ -109,7 +100,7 @@ before bringing more containers up.
 
 ---
 
-## Step 5 — First boot (5-10 min — first build pulls Postgres, GoTrue, Node images)
+## Step 4 — First boot (5-10 min — first build pulls Postgres, GoTrue, Node images)
 
 ```bash
 docker compose --env-file .env.vps -f docker-compose.vps.yml up -d --build
@@ -135,26 +126,26 @@ database system is ready to accept connections
 
 ---
 
-## Step 6 — Verify it's live
+## Step 5 — Verify it's live
 
 Wait 30-60 sec for Traefik to issue SSL certs, then:
 
 ```bash
-curl -I https://app.sepnexus.com/health
-curl -I https://app.sepnexus.com/auth/health
-curl -I https://app.sepnexus.com/admin-api/health
-curl -I https://acq.sepnexus.com/
-curl -I https://leadintel.sepnexus.com/
+curl -I https://closercontrol.srv844822.hstgr.cloud/health
+curl -I https://closercontrol.srv844822.hstgr.cloud/auth/health
+curl -I https://closercontrol.srv844822.hstgr.cloud/admin-api/health
+curl -I https://acq.srv844822.hstgr.cloud/
+curl -I https://leadintel.srv844822.hstgr.cloud/
 ```
 
 All should return `HTTP/2 200`.
 
-Open **https://app.sepnexus.com** in your browser. You should see the
+Open **https://closercontrol.srv844822.hstgr.cloud** in your browser. You should see the
 Sepnexus / Closer Control launcher login page.
 
 ---
 
-## Step 7 — Create the first super-admin user
+## Step 6 — Create the first super-admin user
 
 The fresh `platform-db` has the schema but no users yet. SSH approach:
 
@@ -198,7 +189,7 @@ VALUES ('${USER_ID}', '${USER_ID}'::uuid,
 "
 ```
 
-Now log into **https://app.sepnexus.com** with `admin@sepnexus.com` /
+Now log into **https://closercontrol.srv844822.hstgr.cloud** with `admin@sepnexus.com` /
 `ChangeMeOnFirstLogin@2026`. Once in, use **🔑 Set password** in Platform
 Admin → Users to give yourself + your team real passwords.
 
@@ -279,7 +270,7 @@ docker network ls   # confirm the name
 # in each docker-compose.vps.yml
 ```
 
-**Traefik 404 on app.sepnexus.com**
+**Traefik 404 on closercontrol.srv844822.hstgr.cloud**
 ```bash
 # Confirm launcher is on root_default:
 docker inspect platform-launcher --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'
@@ -290,7 +281,7 @@ docker inspect platform-launcher --format '{{json .Config.Labels}}' | python3 -m
 
 **SSL cert won't issue**
 ```bash
-docker logs root-traefik-1 2>&1 | grep -i app.sepnexus.com | tail -20
+docker logs root-traefik-1 2>&1 | grep -i closercontrol.srv844822.hstgr.cloud | tail -20
 # Most common: DNS not propagated yet. Wait, retry.
 ```
 
@@ -319,11 +310,11 @@ docker compose --env-file .env.vps -f docker-compose.vps.yml up -d --build
 
 | Service | Visible at | Internal hostname (in `root_default`) |
 |---|---|---|
-| Launcher (HQ login + Admin) | https://app.sepnexus.com | platform-launcher |
-| ACQ Coach web | https://acq.sepnexus.com | acq-coach |
-| ACQ Supabase gateway | https://acq-api.sepnexus.com | acq-coach (port 54321) |
-| Lead Intel web | https://leadintel.sepnexus.com | leadintel |
-| LI Supabase gateway | https://leadintel-api.sepnexus.com | leadintel (port 54321) |
+| Launcher (HQ login + Admin) | https://closercontrol.srv844822.hstgr.cloud | platform-launcher |
+| ACQ Coach web | https://acq.srv844822.hstgr.cloud | acq-coach |
+| ACQ Supabase gateway | https://api-acq.srv844822.hstgr.cloud | acq-coach (port 54321) |
+| Lead Intel web | https://leadintel.srv844822.hstgr.cloud | leadintel |
+| LI Supabase gateway | https://api-leadintel.srv844822.hstgr.cloud | leadintel (port 54321) |
 | Platform Auth (GoTrue) | internal only · proxied at `/auth/*` | platform-auth |
 | Platform Admin API | internal only · proxied at `/admin-api/*` | platform-admin-api |
 | Platform DB | internal only | platform-db |
