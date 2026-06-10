@@ -110,7 +110,9 @@ export async function createTopupSession(req: Request, cid: string): Promise<Res
   const r = await resolveCallerCustomer(authed, cid);
   if (r instanceof Response) return r;
 
-  const cust = await sql<{ id: string; name: string }[]>`SELECT id, name FROM platform.customers WHERE id = ${cid}::uuid`;
+  const cust = await sql<{ id: string; name: string; acq_account_id: string | null; leadintel_tenant_id: string | null }[]>`
+    SELECT id, name, acq_account_id, leadintel_tenant_id FROM platform.customers WHERE id = ${cid}::uuid
+  `;
   if (cust.length === 0) return json({ error: "not_found" }, 404);
 
   let stripeInfo;
@@ -137,8 +139,17 @@ export async function createTopupSession(req: Request, cid: string): Promise<Res
       "line_items[0][price_data][product_data][name]": `Closer Control credit · ${cust[0].name}`,
       "line_items[0][price_data][unit_amount]": String(amount),
       "line_items[0][quantity]": "1",
+      // Metadata the existing per-app payments-webhook reads. The webhook
+      // credits the app-local wallet via credit_wallet(); refreshWallet then
+      // re-aggregates app wallets into platform.customer_wallet.
       "metadata[platform_customer_id]": cid,
-      "metadata[purpose]": "wallet_topup",
+      "metadata[type]": "wallet_topup",
+      "metadata[amount_cents]": String(amount),
+      ...(cust[0].acq_account_id
+        ? { "metadata[account_id]": cust[0].acq_account_id }
+        : cust[0].leadintel_tenant_id
+        ? { "metadata[tenant_id]": cust[0].leadintel_tenant_id }
+        : {}),
       success_url: successUrl,
       cancel_url:  cancelUrl,
     });
