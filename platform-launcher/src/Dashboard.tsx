@@ -4,6 +4,7 @@ import type { LauncherConfig } from "./config";
 import {
   getSession,
   saveSession,
+  clearSessions,
   buildSsoLink,
   refreshAppSession,
   jwtNeedsRefresh,
@@ -309,15 +310,33 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin, onOpenAccount }: {
             // makes it bounce to its own login. We refresh on click, then go.
             const openApp = async (e: React.MouseEvent) => {
               e.preventDefault();
-              let s = getSession(p.key);
-              if (!s) return;
-              // Refresh against THIS app's own GoTrue — tokens are app-issued
-              // (per-app dual login), so the refresh_token lives in that app.
-              if (jwtNeedsRefresh(s.access_token)) {
-                const apiUrl  = p.key === "acq" ? cfg.acqApiUrl  : cfg.leadintelApiUrl;
-                const anonKey = p.key === "acq" ? cfg.acqAnonKey : cfg.leadintelAnonKey;
-                const fresh = await refreshAppSession(apiUrl, anonKey, s.refresh_token);
-                if (fresh) { saveSession(p.key, fresh); s = fresh; }
+              // Resolve a FRESH, non-expired token to hand off. All three GoTrues
+              // share the JWT secret, so a live token from EITHER app validates on
+              // both. That's the key to robustness: each app's access token is
+              // ~1h and its refresh_token is SINGLE-USE (GoTrue rotation) — once
+              // the app's own SDK rotates it, the launcher's stored copy is "already
+              // used" and can't refresh. So if THIS app's token is dead, we fall
+              // back to the sibling app's live token rather than bounce the user to
+              // the app's login screen.
+              const resolveFresh = async (key: ProductKey): Promise<ReturnType<typeof getSession>> => {
+                let sess = getSession(key);
+                if (!sess) return null;
+                if (!jwtNeedsRefresh(sess.access_token)) return sess; // still valid
+                const apiUrl  = key === "acq" ? cfg.acqApiUrl  : cfg.leadintelApiUrl;
+                const anonKey = key === "acq" ? cfg.acqAnonKey : cfg.leadintelAnonKey;
+                const fresh = await refreshAppSession(apiUrl, anonKey, sess.refresh_token);
+                if (fresh) { saveSession(key, fresh); return fresh; }
+                return null; // expired AND refresh failed (rotated/already-used)
+              };
+
+              let s = await resolveFresh(p.key);
+              if (!s) s = await resolveFresh(peerKey);  // cross-valid fallback
+              if (!s) {
+                // Both sessions are truly dead — re-auth on the launcher rather
+                // than hand off a known-expired token (which lands on app login).
+                clearSessions();
+                window.location.reload();
+                return;
               }
               window.location.href = buildSsoLink(p.url, s, { [peerKey]: getSession(peerKey) });
             };
