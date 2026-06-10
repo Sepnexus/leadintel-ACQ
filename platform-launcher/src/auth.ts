@@ -120,26 +120,15 @@ export async function dualLogin(
   clearSessions(); // wipe any previous user's sessions before starting a new login
   const res: DualLoginResult = { acq: null, leadintel: null, errors: { acq: null, leadintel: null } };
 
-  // Phase C2 path — single login against platform-auth. Same JWT_SECRET is
-  // shared with ACQ + LI, so this one token validates against all backends.
-  try {
-    const session = await platformPasswordGrant(cfg.platformAuthUrl, email, password);
-    // Mirror the auth.sessions row into both apps so GoTrue accepts the
-    // session_id claim when the user opens an app. Non-fatal — fires-and-forgets
-    // but typically completes in <100ms.
-    await mirrorPlatformSession(session.access_token);
-    // Store under both legacy keys so AppSwitcher / token-handoff keep working.
-    res.acq = session;
-    res.leadintel = session;
-    saveSession("acq", session);
-    saveSession("leadintel", session);
-    return res;
-  } catch (platformErr) {
-    // Fallback to legacy dual-login if platform-auth is unreachable / down.
-    // Logged so we can spot it in browser console; not surfaced to the user.
-    console.warn("[launcher] platform-auth login failed, falling back to dual:", (platformErr as Error).message);
-  }
-
+  // PER-APP DIRECT LOGIN (primary). Each app's own GoTrue issues a token whose
+  // session_id exists in THAT app's auth.sessions — so getUser() and the SDK's
+  // silent refresh work natively, no cross-DB session mirror required. (The
+  // old platform-auth-only path relied on copying the session row into each
+  // app via /sso/mirror-session, which is fragile and broke after the data
+  // migration: the apps rejected every token with "session_not_found".)
+  //
+  // Post-migration all three GoTrue backends share the same auth.users (same
+  // UUIDs + password hash), so one password logs into all of them.
   const [acqR, liR] = await Promise.allSettled([
     passwordGrant(cfg.acqApiUrl, cfg.acqAnonKey, email, password),
     passwordGrant(cfg.leadintelApiUrl, cfg.leadintelAnonKey, email, password),
@@ -155,6 +144,23 @@ export async function dualLogin(
     saveSession("leadintel", liR.value);
   } else {
     res.errors.leadintel = String(liR.reason?.message || liR.reason);
+  }
+  if (res.acq || res.leadintel) return res; // at least one app accepted — done
+
+  // FALLBACK: platform-auth (+ best-effort mirror) for users that exist ONLY
+  // in platform-auth (e.g. a platform admin who isn't a member of any
+  // customer, so has no row in the app GoTrues).
+  try {
+    const session = await platformPasswordGrant(cfg.platformAuthUrl, email, password);
+    await mirrorPlatformSession(session.access_token);
+    res.acq = session;
+    res.leadintel = session;
+    res.errors.acq = null;
+    res.errors.leadintel = null;
+    saveSession("acq", session);
+    saveSession("leadintel", session);
+  } catch (platformErr) {
+    console.warn("[launcher] platform-auth fallback also failed:", (platformErr as Error).message);
   }
   return res;
 }
@@ -179,6 +185,31 @@ export async function refreshSession(
     const r = await fetch(`${platformAuthUrl}/token?grant_type=refresh_token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!r.ok) return null;
+    const d = await r.json().catch(() => null);
+    if (!d?.access_token || !d?.refresh_token) return null;
+    return d as Session;
+  } catch {
+    return null;
+  }
+}
+
+// App-aware refresh — tokens are issued by each app's OWN GoTrue (per-app
+// dual login), so the refresh_token only lives in that app's
+// auth.refresh_tokens. Refresh against the app's gateway, not platform-auth.
+// Returns the fresh Session, or null on failure.
+export async function refreshAppSession(
+  apiUrl: string,
+  anonKey: string,
+  refreshToken: string,
+): Promise<Session | null> {
+  if (!refreshToken) return null;
+  try {
+    const r = await fetch(`${apiUrl}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: anonKey },
       body: JSON.stringify({ refresh_token: refreshToken }),
     });
     if (!r.ok) return null;

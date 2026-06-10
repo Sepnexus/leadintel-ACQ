@@ -3,7 +3,10 @@ import { COLORS, applyTheme, getInitialTheme } from "./theme";
 import type { LauncherConfig } from "./config";
 import {
   getSession,
+  saveSession,
   buildSsoLink,
+  refreshAppSession,
+  jwtNeedsRefresh,
   fetchAcqUserInfo,
   currentUserId,
   currentEmail,
@@ -301,7 +304,23 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin, onOpenAccount }: {
             const available = !!session;
             const active    = available;
             const peerKey: ProductKey = p.key === "acq" ? "leadintel" : "acq";
-            const link = session ? buildSsoLink(p.url, session, { [peerKey]: getSession(peerKey) }) : null;
+            // Refresh-before-handoff: the stored session token may be stale
+            // (Supabase access tokens ~1h). Handing a stale token to the app
+            // makes it bounce to its own login. We refresh on click, then go.
+            const openApp = async (e: React.MouseEvent) => {
+              e.preventDefault();
+              let s = getSession(p.key);
+              if (!s) return;
+              // Refresh against THIS app's own GoTrue — tokens are app-issued
+              // (per-app dual login), so the refresh_token lives in that app.
+              if (jwtNeedsRefresh(s.access_token)) {
+                const apiUrl  = p.key === "acq" ? cfg.acqApiUrl  : cfg.leadintelApiUrl;
+                const anonKey = p.key === "acq" ? cfg.acqAnonKey : cfg.leadintelAnonKey;
+                const fresh = await refreshAppSession(apiUrl, anonKey, s.refresh_token);
+                if (fresh) { saveSession(p.key, fresh); s = fresh; }
+              }
+              window.location.href = buildSsoLink(p.url, s, { [peerKey]: getSession(peerKey) });
+            };
 
             return (
               <div key={p.key} style={{
@@ -335,16 +354,14 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin, onOpenAccount }: {
                 </p>
 
                 {available ? (
-                  link && (
-                    <a href={link} style={{
-                      display: "block", textAlign: "center", marginTop: 16,
-                      background: p.accent, border: "none", color: "#fff",
-                      borderRadius: 8, padding: "11px",
-                      fontSize: 12.5, fontWeight: 700, textDecoration: "none", letterSpacing: "0.03em",
-                    }}>
-                      Open App →
-                    </a>
-                  )
+                  <a href={p.url} onClick={openApp} style={{
+                    display: "block", textAlign: "center", marginTop: 16,
+                    background: p.accent, border: "none", color: "#fff",
+                    borderRadius: 8, padding: "11px", cursor: "pointer",
+                    fontSize: 12.5, fontWeight: 700, textDecoration: "none", letterSpacing: "0.03em",
+                  }}>
+                    Open App →
+                  </a>
                 ) : (
                   /* No session for this product — user has no access. */
                   <div style={{

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { loadConfig, type LauncherConfig } from "./config";
 import {
   getSession, saveSession, clearSessions, buildSsoLink,
-  refreshSession, jwtNeedsRefresh, type ProductKey,
+  refreshAppSession, jwtNeedsRefresh, type ProductKey,
 } from "./auth";
 import { Login } from "./Login";
 import { Dashboard } from "./Dashboard";
@@ -54,16 +54,15 @@ export function App() {
         return;
       }
 
-      // Refresh-before-handoff: avoids the "expired token → login page" trap
-      // when the user has been on the launcher for >1h.
+      // Refresh-before-handoff against THIS app's own GoTrue (tokens are
+      // app-issued via per-app dual login), avoiding the "expired token →
+      // login page" trap when the user has been on the launcher for >1h.
       if (jwtNeedsRefresh(session.access_token)) {
-        const fresh = await refreshSession(cfg.platformAuthUrl, session.refresh_token);
+        const apiUrl  = key === "acq" ? cfg.acqApiUrl  : cfg.leadintelApiUrl;
+        const anonKey = key === "acq" ? cfg.acqAnonKey : cfg.leadintelAnonKey;
+        const fresh = await refreshAppSession(apiUrl, anonKey, session.refresh_token);
         if (fresh) {
-          // Same JWT_SECRET + same session_id → both apps' SDKs accept it.
-          // Store under both keys so the peer link in the receiving app's
-          // AppSwitcher also has a non-stale token.
-          saveSession("acq", fresh);
-          saveSession("leadintel", fresh);
+          saveSession(key, fresh);
           session = fresh;
         } else {
           // refresh_token also dead → can't SSO. Wipe + force fresh login.
