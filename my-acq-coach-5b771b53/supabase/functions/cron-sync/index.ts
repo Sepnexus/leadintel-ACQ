@@ -737,9 +737,14 @@ serve(async (req) => {
     // Authorisation:
     // - Cron passes x-cron-secret matching CRON_SECRET → trigger=cron
     // - Otherwise must be a JWT for super_admin or account_admin of the target → trigger=manual
-    const CRON_SECRET = "9bb9b061720176cab6326f7f04d085df4b7a544e4e1212dc3524df2ec6ea12cb";
+    // From env — never hardcode: this file lives in a Git repo, and a secret
+    // in source is readable by anyone with repo access. Set CRON_SECRET in
+    // the deployment env (write-project-envs.sh provides it on the VPS).
+    const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? "";
     const headerSecret = req.headers.get("x-cron-secret") || "";
-    const isCronCall = headerSecret === CRON_SECRET;
+    // Guard the unset case: if CRON_SECRET is empty, an empty header must
+    // NOT authenticate (empty === empty would be an auth bypass).
+    const isCronCall = CRON_SECRET.length > 0 && headerSecret === CRON_SECRET;
 
     let trigger: "cron" | "manual" = "cron";
 
