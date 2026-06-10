@@ -12,6 +12,7 @@ import ResetPasswordPage from "./pages/ResetPassword.tsx";
 import AcceptInvitePage from "./pages/AcceptInvite.tsx";
 import BillingPage from "./pages/Billing.tsx";
 import { AuthProvider } from "./contexts/AuthContext";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AppSwitcher } from "./components/AppSwitcher";
 import { SyncStatusBar } from "./components/SyncStatusBar";
@@ -32,6 +33,7 @@ const App = () => (
       <Sonner />
       <AppSwitcher />
       <BrowserRouter>
+        <ThemeProvider>
         <AuthProvider>
           <SyncStatusBar />
           <Routes>
@@ -56,6 +58,7 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>
+        </ThemeProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
