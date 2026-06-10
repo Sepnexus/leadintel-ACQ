@@ -17,6 +17,7 @@ import { refreshWallet } from "./routes/wallet.ts";
 import { mirrorSession } from "./routes/sso.ts";
 import { listMasterKeys, setMasterKey, deleteMasterKey } from "./routes/master-keys.ts";
 import { getSetupStatus } from "./routes/setup-status.ts";
+import { stripeWebhook } from "./routes/stripe-webhook.ts";
 import { getSyncSchedule, updateSyncSchedule, runSyncJobNow } from "./routes/sync-schedule.ts";
 import { startSyncScheduler } from "./lib/sync-scheduler.ts";
 import {
@@ -95,6 +96,19 @@ Deno.serve({ port: PORT }, async (req) => {
   // Health (no auth)
   if (HEALTH.test(url.pathname)) {
     return new Response("ok\n", { status: 200, headers: { "Content-Type": "text/plain", ...corsHeaders } });
+  }
+
+  // Stripe webhook (no JWT — verified by Stripe signature inside the handler).
+  // ONE centralized endpoint for the whole platform; register it in Stripe as
+  // https://<launcher-host>/admin-api/stripe/webhook
+  if (req.method === "POST" && /^\/admin-api\/stripe\/webhook\/?$/.test(url.pathname)) {
+    try {
+      const res = await stripeWebhook(req);
+      return new Response(await res.text(), { status: res.status, headers: { ...Object.fromEntries(res.headers), ...corsHeaders } });
+    } catch (e) {
+      console.error("[admin-api] stripe-webhook error:", (e as Error).stack ?? e);
+      return json({ error: "internal" }, 500, corsHeaders);
+    }
   }
 
   // Authn-only routes (no admin check, but valid JWT required)
