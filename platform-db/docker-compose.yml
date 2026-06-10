@@ -15,6 +15,10 @@ services:
       # Read by the init/00-roles.sh script on first boot
       PLATFORM_APP_PASSWORD: ${PLATFORM_APP_PASSWORD}
       PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD}
+      # Read by init/09-auth-bootstrap.sh — supabase_auth_admin's password.
+      # Without this in the container env, the role is created with an EMPTY
+      # password and GoTrue crash-loops with "password authentication failed".
+      PLATFORM_AUTH_ADMIN_PASSWORD: ${PLATFORM_AUTH_ADMIN_PASSWORD}
       # Postgres tunings — keep simple for local
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
