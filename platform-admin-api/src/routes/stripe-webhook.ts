@@ -199,32 +199,31 @@ export async function stripeWebhook(req: Request): Promise<Response> {
       updated_at = now()
   `;
 
-  // Re-aggregate the platform wallet from the app wallets (mirror of
-  // refreshWallet) so the balance reflects the new top-up immediately.
-  let acqCents = 0, liCents = 0;
-  if (acq_account_id && acqSql) {
-    const r = await acqSql<{ balance_cents: number }[]>`SELECT balance_cents FROM wallets WHERE account_id = ${acq_account_id}::uuid`;
-    acqCents = r[0]?.balance_cents ?? 0;
-  }
-  if (leadintel_tenant_id && liSql) {
-    const r = await liSql<{ balance_cents: number }[]>`SELECT balance_cents FROM wallets WHERE tenant_id = ${leadintel_tenant_id}::uuid`;
-    liCents = r[0]?.balance_cents ?? 0;
-  }
-  const total = acqCents + liCents;
-  await sql`
-    INSERT INTO platform.customer_wallet (customer_id, balance_cents, refreshed_at)
-    VALUES (${customerId}::uuid, ${total}, now())
-    ON CONFLICT (customer_id) DO UPDATE SET balance_cents = EXCLUDED.balance_cents, refreshed_at = now()
+  // Unified ledger: credit_wallet above already drove platform.customer_wallet
+  // (via fdw) AND wrote the platform.wallet_transactions row. Do NOT re-sum the
+  // app wallets — they now MIRROR the shared balance, so summing double-counts.
+  // Just read the authoritative balance and mirror it into the OTHER app's
+  // wallet so both UIs are fresh after the top-up.
+  const pw = await sql<{ balance_cents: number }[]>`
+    SELECT balance_cents FROM platform.customer_wallet WHERE customer_id = ${customerId}::uuid
   `;
+  const total = pw[0]?.balance_cents ?? 0;
+  if (product === "acq_coach" && leadintel_tenant_id && liSql) {
+    try {
+      await liSql`
+        INSERT INTO wallets (tenant_id, balance_cents) VALUES (${leadintel_tenant_id}::uuid, ${total})
+        ON CONFLICT (tenant_id) DO UPDATE SET balance_cents = ${total}, updated_at = now()
+      `;
+    } catch (e) { console.error("[stripe-webhook] li mirror:", (e as Error).message); }
+  } else if (product === "lead_intel" && acq_account_id && acqSql) {
+    try {
+      await acqSql`
+        INSERT INTO wallets (account_id, balance_cents) VALUES (${acq_account_id}::uuid, ${total})
+        ON CONFLICT (account_id) DO UPDATE SET balance_cents = ${total}, updated_at = now()
+      `;
+    } catch (e) { console.error("[stripe-webhook] acq mirror:", (e as Error).message); }
+  }
 
-  // Ledger row (UNIQUE stripe_session_id dedupes replays).
-  await sql`
-    INSERT INTO platform.wallet_transactions (customer_id, product, type, amount_cents, balance_after_cents, reason, stripe_session_id, metadata)
-    VALUES (${customerId}::uuid, ${product}::platform.product, 'credit', ${amountCents}, ${total}, ${"Stripe top-up"}, ${sessionId},
-            ${sql.json({ env, stripe_customer_id: stripeCustomerId, payment_method_id: pmId, card_brand: brand, card_last4: last4 })})
-    ON CONFLICT (stripe_session_id) DO NOTHING
-  `;
-
-  console.log(`[stripe-webhook] credited ${product} ${amountCents}c for customer ${customerId} (new balance ${total}c)`);
+  console.log(`[stripe-webhook] credited ${product} ${amountCents}c for customer ${customerId} (unified balance ${total}c)`);
   return new Response(JSON.stringify({ received: true, credited: amountCents, balance: total }), { status: 200 });
 }
