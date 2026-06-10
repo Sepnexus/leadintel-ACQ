@@ -68,8 +68,18 @@ In nano:
 
 1. The first block (`LAUNCHER_HOST`, `ACQ_HOST`, etc.) — leave defaults if you want
    the default `*.srv844822.hstgr.cloud` subdomains. Change if you want different hostnames.
-2. **Replace all the `PASTE_FROM_GEN_SECRETS` lines** with the block from Step 2
-   (paste the whole block; the placeholder lines get overwritten).
+2. **Replace all the `PASTE_FROM_GEN_SECRETS` lines** with the block from Step 1
+   (paste the whole block; the placeholder lines get overwritten). Or skip the
+   hand-editing entirely with the auto-merge:
+
+   ```bash
+   bash scripts/gen-vps-secrets.sh > /root/sepnexus-secrets.txt
+   chmod 600 /root/sepnexus-secrets.txt
+   grep -E '^[A-Z_]+=' /root/sepnexus-secrets.txt | while IFS= read -r line; do
+     key="${line%%=*}"
+     sed -i "s|^${key}=.*|${line}|" .env.vps
+   done
+   ```
 3. Fill `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `OPENAI_API_KEY`,
    `ANTHROPIC_API_KEY`, `DEEPGRAM_API_KEY` from your provider dashboards.
    (You can leave them blank for a first-boot smoke test and add them later
@@ -77,6 +87,16 @@ In nano:
 4. Optionally change `DEFAULT_USER_PASSWORD`.
 
 Save: `Ctrl+O`, Enter, `Ctrl+X`.
+
+**Then fan the values out into the six per-project `.env` files** (the compose
+stack reads those, not `.env.vps` directly):
+
+```bash
+bash scripts/write-project-envs.sh
+```
+
+You should see `✓ <project>/.env` for all six projects. Re-run this any time
+you edit `.env.vps` — the per-project files are generated, never hand-edited.
 
 ---
 

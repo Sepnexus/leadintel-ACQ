@@ -48,35 +48,47 @@ include:
   #   platform-db + platform-auth before admin-api (it reads from both)
   #   admin-api before launcher (launcher nginx proxies to it)
   #   ACQ + LI can come up in any order after platform-db has its schema
+  #
+  # env_file on each entry: Compose resolves ${VARS} inside an included file
+  # from that include's env_file, NOT from the top-level --env-file. The six
+  # per-project .env files are generated from .env.vps by
+  # scripts/write-project-envs.sh — run it before `up`, and re-run it any
+  # time you edit .env.vps.
   - path:
       - platform-db/docker-compose.yml
       - platform-db/docker-compose.vps.yml
     project_directory: ./platform-db
+    env_file: ./platform-db/.env
 
   - path:
       - platform-auth/docker-compose.yml
       - platform-auth/docker-compose.vps.yml
     project_directory: ./platform-auth
+    env_file: ./platform-auth/.env
 
   - path:
       - platform-admin-api/docker-compose.yml
       - platform-admin-api/docker-compose.vps.yml
     project_directory: ./platform-admin-api
+    env_file: ./platform-admin-api/.env
 
   - path:
       - platform-launcher/docker-compose.yml
       - platform-launcher/docker-compose.vps.yml
     project_directory: ./platform-launcher
+    env_file: ./platform-launcher/.env
 
   - path:
       - acq-coach-selfhost/docker-compose.yml
       - acq-coach-selfhost/docker-compose.vps.yml
     project_directory: ./acq-coach-selfhost
+    env_file: ./acq-coach-selfhost/.env
 
   - path:
       - leadintel-selfhost/docker-compose.yml
       - leadintel-selfhost/docker-compose.vps.yml
     project_directory: ./leadintel-selfhost
+    env_file: ./leadintel-selfhost/.env
 
 networks:
   root_default:
