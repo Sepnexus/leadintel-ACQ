@@ -81,20 +81,35 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin, onOpenAccount }: {
   const [userInfo, setUserInfo]         = useState<UserInfo | null>(null);
   const [infoTimedOut, setInfoTimedOut] = useState(false);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  // Real per-product entitlement (from customer membership), NOT whether this
+  // app's per-app login happened to succeed. A user can be entitled to ACQ yet
+  // have no ACQ session (e.g. not provisioned in ACQ's auth.users) — the
+  // cross-app handoff still opens it, so the card must unlock on entitlement.
+  const [entitled, setEntitled] = useState<{ acq: boolean; leadintel: boolean }>({ acq: false, leadintel: false });
 
   // Quietly check whether this user is a platform admin (controls the Admin nav button).
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const r = await fetch("/admin-api/me", {
-          headers: (() => {
-            const sess = getSession("acq") ?? getSession("leadintel");
-            return sess ? { Authorization: `Bearer ${sess.access_token}` } : {};
-          })(),
-        });
+        const sess = getSession("acq") ?? getSession("leadintel");
+        const headers = sess ? { Authorization: `Bearer ${sess.access_token}` } : {};
+        const r = await fetch("/admin-api/me", { headers });
         if (!cancelled) setIsPlatformAdmin(r.ok);
-      } catch { /* network error → no admin button */ }
+
+        // Entitlement: which products the user's customer(s) have. Platform
+        // admins are entitled to all. Falls back silently to session-presence.
+        const cr = await fetch("/admin-api/me/customers", { headers });
+        if (cr.ok && !cancelled) {
+          const d = await cr.json();
+          const isAdmin = !!d.is_platform_admin;
+          const cs: Array<{ on_acq?: boolean; on_leadintel?: boolean }> = Array.isArray(d.customers) ? d.customers : [];
+          setEntitled({
+            acq:       isAdmin || cs.some(c => c.on_acq),
+            leadintel: isAdmin || cs.some(c => c.on_leadintel),
+          });
+        }
+      } catch { /* network error → keep defaults, card falls back to session presence */ }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -170,7 +185,7 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin, onOpenAccount }: {
     ...p,
     url: p.key === "acq" ? cfg.acqUrl : cfg.leadintelUrl,
   }));
-  const availableCount = products.filter(p => !!getSession(p.key)).length;
+  const availableCount = products.filter(p => !!getSession(p.key) || entitled[p.key]).length;
 
   const label = roleLabel(userInfo.role);
 
@@ -302,7 +317,10 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin, onOpenAccount }: {
             // If the user has a session for this product, the backend already
             // entitled them — no separate per-user toggle.
             const session   = getSession(p.key);
-            const available = !!session;
+            // Available if the user is entitled (customer has the product) OR
+            // already holds a session for it. Entitled-but-sessionless users
+            // still open it via the cross-app token handoff in openApp().
+            const available = !!session || entitled[p.key];
             const active    = available;
             const peerKey: ProductKey = p.key === "acq" ? "leadintel" : "acq";
             // Refresh-before-handoff: the stored session token may be stale
