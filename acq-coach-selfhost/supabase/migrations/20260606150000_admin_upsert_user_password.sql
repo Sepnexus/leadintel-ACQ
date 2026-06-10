@@ -37,7 +37,18 @@ BEGIN
     RAISE EXCEPTION 'p_encrypted_password must be a bcrypt hash ($2a/$2b/$2y), got %', left(coalesce(p_encrypted_password, ''), 6);
   END IF;
 
+  -- Resolve the existing auth.users row by id FIRST, then fall back to email.
+  -- Why the email fallback: the caller passes platform.users.id, which is
+  -- *supposed* to equal auth.users.id (Phase C2 identity merger), but for
+  -- some pre-merger users it doesn't. Without the email fallback, the id
+  -- lookup misses, the function tries to INSERT, and the unique email
+  -- constraint throws — so Set Password failed for exactly those users.
+  -- We update whichever row actually owns the email and key the identity
+  -- row to its real id.
   SELECT id INTO v_existing_id FROM auth.users WHERE id = p_user_id;
+  IF v_existing_id IS NULL THEN
+    SELECT id INTO v_existing_id FROM auth.users WHERE email = p_email LIMIT 1;
+  END IF;
 
   IF v_existing_id IS NOT NULL THEN
     -- COALESCE the NULL-but-must-be-'' token columns to '' alongside the
@@ -50,17 +61,18 @@ BEGIN
            email_change_token_new = COALESCE(email_change_token_new, ''),
            email_change          = COALESCE(email_change,          ''),
            updated_at            = now()
-     WHERE id = p_user_id;
+     WHERE id = v_existing_id;
     -- Fall through to identity-upsert below in case the user was created
     -- before we started provisioning identities (e.g. earlier admin-set
-    -- runs without this fix, or backfilled rows from Phase C2).
+    -- runs without this fix, or backfilled rows from Phase C2). Keyed to
+    -- the real auth id (v_existing_id), not the passed-in p_user_id.
     INSERT INTO auth.identities (
       provider_id, user_id, identity_data, provider, created_at, updated_at
     ) VALUES (
-      p_user_id::text,
-      p_user_id,
+      v_existing_id::text,
+      v_existing_id,
       jsonb_build_object(
-        'sub',            p_user_id::text,
+        'sub',            v_existing_id::text,
         'email',          p_email,
         'email_verified', false,
         'phone_verified', false

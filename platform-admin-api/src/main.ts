@@ -17,6 +17,8 @@ import { refreshWallet } from "./routes/wallet.ts";
 import { mirrorSession } from "./routes/sso.ts";
 import { listMasterKeys, setMasterKey, deleteMasterKey } from "./routes/master-keys.ts";
 import { getSetupStatus } from "./routes/setup-status.ts";
+import { getSyncSchedule, updateSyncSchedule, runSyncJobNow } from "./routes/sync-schedule.ts";
+import { startSyncScheduler } from "./lib/sync-scheduler.ts";
 import {
   listMyCustomers, listMyTeam, inviteToTeam, removeFromTeam,
   getMyBilling, getMyConnections, getMyActivity, setAutoRecharge,
@@ -54,6 +56,9 @@ const routes: Route[] = [
   { method: "GET",    pattern: /^\/admin-api\/platform-settings\/master-keys\/?$/,             handler: listMasterKeys },
   { method: "PUT",    pattern: /^\/admin-api\/platform-settings\/master-keys\/([A-Z0-9_]+)\/?$/, handler: setMasterKey },
   { method: "DELETE", pattern: /^\/admin-api\/platform-settings\/master-keys\/([A-Z0-9_]+)\/?$/, handler: deleteMasterKey },
+  { method: "GET",    pattern: /^\/admin-api\/platform-settings\/sync-schedule\/?$/,                    handler: getSyncSchedule },
+  { method: "PUT",    pattern: /^\/admin-api\/platform-settings\/sync-schedule\/([a-z_]+)\/?$/,        handler: updateSyncSchedule },
+  { method: "POST",   pattern: /^\/admin-api\/platform-settings\/sync-schedule\/([a-z_]+)\/run\/?$/,  handler: runSyncJobNow },
   { method: "POST",  pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/wallet\/refresh\/?$/, handler: refreshWallet },
 ];
 
@@ -151,6 +156,8 @@ Deno.serve({ port: PORT }, async (req) => {
 });
 
 console.log(`[admin-api] listening on :${PORT}`);
+
+startSyncScheduler();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",

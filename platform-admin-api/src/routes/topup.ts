@@ -49,7 +49,9 @@ async function getMasterKey(name: string): Promise<string | null> {
 }
 
 async function getStripe(): Promise<{ secret: string; env: "test" | "live" }> {
-  const env = (Deno.env.get("STRIPE_ENV") ?? "test").toLowerCase() === "live" ? "live" : "test";
+  // Mode comes from the STRIPE_ENV master key (settable in Platform Settings
+  // UI) with container-env fallback; anything but "live" means test.
+  const env = ((await getMasterKey("STRIPE_ENV")) ?? "test").toLowerCase() === "live" ? "live" : "test";
   const key = await getMasterKey(env === "live" ? "STRIPE_LIVE_SECRET_KEY" : "STRIPE_TEST_SECRET_KEY");
   if (!key) throw new Error(`Stripe ${env} secret key not configured — set it in Platform Settings → Master Keys`);
   return { secret: key, env };

@@ -103,6 +103,12 @@ Deno.serve(async (req: Request) => {
     const containerEnv = Deno.env.toObject();
     const master = await getMasterKeys();
     const merged = { ...containerEnv, ...master };
+    // Per-app Stripe webhook secrets: the master_keys table is shared by both
+    // apps, but webhook signing secrets are per-endpoint. The UI stores them
+    // app-prefixed; each app's router claims its own prefix here.
+    if (merged["LEADINTEL_STRIPE_TEST_WEBHOOK_SECRET"]) merged["STRIPE_TEST_WEBHOOK_SECRET"] = merged["LEADINTEL_STRIPE_TEST_WEBHOOK_SECRET"];
+    if (merged["LEADINTEL_STRIPE_LIVE_WEBHOOK_SECRET"]) merged["STRIPE_LIVE_WEBHOOK_SECRET"] = merged["LEADINTEL_STRIPE_LIVE_WEBHOOK_SECRET"];
+
     const envVars = Object.entries(merged);
     const worker = await EdgeRuntime.userWorkers.create({
       servicePath,

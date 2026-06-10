@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 import { COLORS } from "../theme";
-import { adminApi, MasterKey } from "./adminApi";
+import { adminApi, MasterKey, SyncJob } from "./adminApi";
 import { Pill, ErrorBanner } from "./AdminLayout";
 import { useToast } from "./Toast";
 
@@ -40,6 +40,7 @@ export function AdminPlatformSettingsPage() {
         </div>
       </div>
 
+      <SyncSchedulePanel />
       <MasterKeysPanel />
       <EnvStatusPanel />
     </div>
@@ -291,3 +292,144 @@ const btnDanger: React.CSSProperties = {
   borderRadius: 6, padding: "6px 12px", color: "#ff7a7a",
   fontSize: 12, cursor: "pointer", fontFamily: FONT,
 };
+
+// ── Sync Schedule (scheduler runs inside admin-api; settings in platform-db) ─
+
+function SyncSchedulePanel() {
+  const [jobs, setJobs] = useState<SyncJob[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null); // job_name being acted on
+  const [draftIntervals, setDraftIntervals] = useState<Record<string, string>>({});
+
+  async function load() {
+    const r = await adminApi.getSyncSchedule();
+    setLoading(false);
+    if (r.ok) { setJobs(r.data.jobs); setError(null); }
+    else      setError(r.error);
+  }
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 15_000); // keep last-run status fresh
+    return () => clearInterval(t);
+  }, []);
+
+  async function toggle(job: SyncJob) {
+    setBusy(job.job_name);
+    const r = await adminApi.updateSyncJob(job.job_name, { enabled: !job.enabled });
+    setBusy(null);
+    if (!r.ok) setError(r.error); else load();
+  }
+
+  async function saveInterval(job: SyncJob) {
+    const raw = draftIntervals[job.job_name];
+    const v = parseInt(raw ?? "", 10);
+    if (!Number.isFinite(v) || v < 1 || v > 1440) { setError("Interval must be 1–1440 minutes"); return; }
+    setBusy(job.job_name);
+    const r = await adminApi.updateSyncJob(job.job_name, { interval_minutes: v });
+    setBusy(null);
+    if (!r.ok) setError(r.error);
+    else { setDraftIntervals(d => { const c = { ...d }; delete c[job.job_name]; return c; }); load(); }
+  }
+
+  async function runNow(job: SyncJob) {
+    setBusy(job.job_name);
+    const r = await adminApi.runSyncJobNow(job.job_name);
+    setBusy(null);
+    if (!r.ok) setError("error" in r ? r.error : "run failed");
+    load();
+  }
+
+  const fmtAgo = (ts: string | null) => {
+    if (!ts) return "never";
+    const s = Math.round((Date.now() - new Date(ts).getTime()) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.round(s / 60)}m ago`;
+    return `${Math.round(s / 3600)}h ago`;
+  };
+
+  return (
+    <div style={{
+      background: COLORS.S1, border: `1px solid ${COLORS.B2}`,
+      borderRadius: 10, marginBottom: 18, overflow: "hidden",
+    }}>
+      <div style={{ padding: "14px 20px", borderBottom: `1px solid ${COLORS.B2}` }}>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>Sync Schedule</div>
+        <div style={{ fontSize: 11, color: COLORS.T3, marginTop: 3 }}>
+          Background GHL sync cadence · runs inside the platform (no server cron) · changes apply within 30s
+        </div>
+      </div>
+
+      {error && <div style={{ padding: 16 }}><ErrorBanner>{error}</ErrorBanner></div>}
+
+      {loading && jobs.length === 0 ? (
+        <div style={{ padding: 32, textAlign: "center", color: COLORS.T3 }}>Loading…</div>
+      ) : jobs.map((j, i) => {
+        const statusOk = j.last_status === "ok";
+        const statusRunning = j.last_status === "running";
+        return (
+          <div key={j.job_name} style={{
+            display: "grid", gridTemplateColumns: "minmax(220px,1.2fr) 150px 1fr 200px",
+            padding: "13px 20px", borderTop: i === 0 ? "none" : `1px solid ${COLORS.B2}`,
+            alignItems: "center", gap: 12,
+          }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{j.label}</div>
+              <div style={{ fontSize: 10, color: COLORS.T3, fontFamily: "ui-monospace, monospace", marginTop: 2 }}>{j.job_name}</div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 11, color: COLORS.T3 }}>every</span>
+              <input
+                type="number" min={1} max={1440}
+                value={draftIntervals[j.job_name] ?? String(j.interval_minutes)}
+                onChange={e => setDraftIntervals(d => ({ ...d, [j.job_name]: e.target.value }))}
+                style={{
+                  width: 56, padding: "5px 8px", background: COLORS.BG,
+                  border: `1px solid ${COLORS.B3}`, borderRadius: 6,
+                  color: COLORS.TEXT, fontSize: 12, textAlign: "center",
+                }}
+              />
+              <span style={{ fontSize: 11, color: COLORS.T3 }}>min</span>
+              {draftIntervals[j.job_name] !== undefined && draftIntervals[j.job_name] !== String(j.interval_minutes) && (
+                <button onClick={() => saveInterval(j)} disabled={busy === j.job_name} style={{ ...btnPrimary, padding: "4px 8px", fontSize: 11 }}>Save</button>
+              )}
+            </div>
+
+            <div style={{ fontSize: 11, color: COLORS.T3, lineHeight: 1.5 }}>
+              Last run: {fmtAgo(j.last_run_at)}
+              {j.last_status && (
+                <span style={{
+                  marginLeft: 8,
+                  color: statusOk ? COLORS.GREEN : statusRunning ? "#ffc966" : "#ff7a7a",
+                }} title={j.last_status}>
+                  {statusOk ? "✓ ok" : statusRunning ? "⏳ running" : `✗ ${j.last_status.slice(0, 60)}`}
+                </span>
+              )}
+              {j.last_duration_ms != null && <span style={{ marginLeft: 6 }}>· {j.last_duration_ms}ms</span>}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button onClick={() => runNow(j)} disabled={busy === j.job_name} style={btnGhost}>
+                {busy === j.job_name ? "…" : "▶ Run now"}
+              </button>
+              <button
+                onClick={() => toggle(j)}
+                disabled={busy === j.job_name}
+                style={{
+                  ...btnPrimary,
+                  background: j.enabled ? "rgba(192,57,43,0.15)" : undefined,
+                  border: j.enabled ? "1px solid #c0392b" : (btnPrimary as Record<string, string>).border,
+                  color: j.enabled ? "#ff7a7a" : (btnPrimary as Record<string, string>).color,
+                  minWidth: 76,
+                }}
+              >
+                {j.enabled ? "Disable" : "Enable"}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

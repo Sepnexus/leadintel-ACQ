@@ -17,6 +17,12 @@ services:
       # edge functions keep working without code changes).
       ACQ_DB_URL: "${ACQ_DB_URL:-}"
       LEADINTEL_DB_URL: "${LEADINTEL_DB_URL:-}"
+      # NOTE: CRON_SECRET (for the sync scheduler) comes from env_file (.env),
+      # NOT an `environment:` line. An `environment:` entry with a ${VAR:-}
+      # default would OVERRIDE env_file with empty when the interpolation
+      # context lacks the var — which silently broke the scheduler. The
+      # scheduler's internal gateway URLs (acq-coach/leadintel :54321) have
+      # code-level defaults, so they need no env at all.
       PORT: "8080"
     networks:
       - platform-shared

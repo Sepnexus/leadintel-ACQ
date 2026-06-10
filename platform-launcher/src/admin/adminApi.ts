@@ -145,6 +145,16 @@ export interface AuditEvent {
 
 // Editable platform-wide API keys (OPENAI, ANTHROPIC, STRIPE, ...).
 // Stored in platform.master_keys, read by edge fns via getEnvOrMasterKey().
+
+export interface SyncJob {
+  job_name: string;
+  label: string;
+  enabled: boolean;
+  interval_minutes: number;
+  last_run_at: string | null;
+  last_status: string | null;
+  last_duration_ms: number | null;
+}
 export interface MasterKey {
   name: string;
   description: string;
@@ -238,6 +248,19 @@ export const adminApi = {
     all_done: boolean;
   }>(fetch(`${BASE}/customers/${id}/setup-status`, { headers: authHeader() })),
   // ── Editable master keys (OPENAI / STRIPE / ...) ───────────────────────────
+  // ── Sync schedule (scheduler lives in admin-api; settings in platform-db) ──
+  getSyncSchedule:  () => jsonOr<{ jobs: SyncJob[] }>(fetch(`${BASE}/platform-settings/sync-schedule`, { headers: authHeader() })),
+  updateSyncJob:    (job: string, fields: { enabled?: boolean; interval_minutes?: number }) =>
+    jsonOr<{ ok: true; job: SyncJob }>(fetch(`${BASE}/platform-settings/sync-schedule/${job}`, {
+      method: "PUT",
+      headers: { ...authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    })),
+  runSyncJobNow:    (job: string) =>
+    jsonOr<{ ok: boolean; status: string; duration_ms: number }>(fetch(`${BASE}/platform-settings/sync-schedule/${job}/run`, {
+      method: "POST",
+      headers: authHeader(),
+    })),
   listMasterKeys:   () => jsonOr<{ keys: MasterKey[]; count: number }>(fetch(`${BASE}/platform-settings/master-keys`, { headers: authHeader() })),
   setMasterKey:     (name: string, value: string) =>
     jsonOr<{ ok: true; key_name: string; length: number }>(fetch(`${BASE}/platform-settings/master-keys/${name}`, {
