@@ -30,18 +30,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [who, setWho] = useState<WhoAmI | null>(null);
 
   const fetchWho = useCallback(async (token: string) => {
-    try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/ghl-proxy`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY },
-        body: JSON.stringify({ action: "whoami" }),
-      });
-      const data = await res.json();
-      if (res.ok) setWho(data);
-      else setWho(null);
-    } catch {
-      setWho(null);
+    // session && !who renders "Setting up your account…". This used to fire
+    // ONCE — a single failed call (edge cold start, token expired seconds
+    // earlier, transient network) stranded the user on that screen forever.
+    // Retry with backoff, pulling a freshly-refreshed token from the SDK on
+    // later attempts in case the first token had just aged out.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, attempt * 2000));
+        try {
+          const { data } = await supabase.auth.getSession();
+          token = data.session?.access_token ?? token;
+        } catch { /* keep previous token */ }
+      }
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/ghl-proxy`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY },
+          body: JSON.stringify({ action: "whoami" }),
+        });
+        const data = await res.json();
+        if (res.ok) { setWho(data); return; }
+        console.warn(`[useAuth] whoami attempt ${attempt + 1} failed:`, res.status, data?.error ?? "");
+      } catch (e) {
+        console.warn(`[useAuth] whoami attempt ${attempt + 1} threw:`, (e as Error).message);
+      }
     }
+    setWho(null);
   }, []);
 
   useEffect(() => {

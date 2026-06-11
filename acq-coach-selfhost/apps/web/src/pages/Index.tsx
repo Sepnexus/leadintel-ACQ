@@ -9,7 +9,7 @@ import Billing from "./Billing";
 import { supabase } from "@/integrations/supabase/client";
 
 const Index = () => {
-  const { session, loading, who, signOut } = useAuth();
+  const { session, loading, who, refreshWho, signOut } = useAuth();
   const [view, setView] = useState<"home" | "team" | "billing" | "rep-as">(() => {
     // If returning from Stripe top-up, land directly on the billing page.
     if (typeof window !== "undefined") {
@@ -46,7 +46,11 @@ const Index = () => {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", background: "#000", color: "#f4f4f4", fontFamily: "'Open Sans', sans-serif", gap: 14 }}>
         <div>Setting up your account…</div>
-        <button onClick={signOut} style={{ background: "transparent", border: "1px solid #1c1c1c", color: "#999", padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>Sign out</button>
+        <div style={{ fontSize: 12, color: "#777" }}>Taking longer than usual? Try again or sign out below.</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={() => refreshWho()} style={{ background: "#4e7d3d", border: "none", color: "#fff", padding: "6px 14px", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Retry</button>
+          <button onClick={signOut} style={{ background: "transparent", border: "1px solid #1c1c1c", color: "#999", padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>Sign out</button>
+        </div>
       </div>
     );
   }

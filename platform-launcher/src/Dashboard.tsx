@@ -347,21 +347,40 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin, onOpenAccount }: {
                 return null; // expired AND refresh failed (rotated/already-used)
               };
 
+              // LIVENESS check before handoff: ask the ISSUING app's GoTrue
+              // whether the session is still valid (/auth/v1/user → 401/403
+              // when revoked, e.g. the user logged out of that app, which
+              // deletes its auth.sessions row). Without this, a signature-valid
+              // but revoked token loads the app shell and strands the user on
+              // "Setting up your account…" because every getUser/edge call
+              // 401s. Network errors don't block the handoff.
+              const sessionAlive = async (key: ProductKey, sess: NonNullable<ReturnType<typeof getSession>>): Promise<boolean> => {
+                const apiUrl  = key === "acq" ? cfg.acqApiUrl  : cfg.leadintelApiUrl;
+                const anonKey = key === "acq" ? cfg.acqAnonKey : cfg.leadintelAnonKey;
+                try {
+                  const r = await fetch(`${apiUrl}/auth/v1/user`, {
+                    headers: { apikey: anonKey, Authorization: `Bearer ${sess.access_token}` },
+                  });
+                  return r.ok;
+                } catch { return true; /* gateway hiccup — don't block */ }
+              };
+
               let s = await resolveFresh(p.key);
-              if (!s) s = await resolveFresh(peerKey);  // cross-valid fallback
+              if (s && !(await sessionAlive(p.key, s))) s = null;   // revoked → discard
               if (!s) {
-                // Both sessions are truly dead — re-auth on the launcher rather
-                // than hand off a known-expired token (which lands on app login).
+                s = await resolveFresh(peerKey);                     // cross-valid fallback
+                if (s && !(await sessionAlive(peerKey, s))) s = null;
+              }
+              if (!s) {
+                // Both sessions dead/revoked — re-auth on the launcher rather
+                // than strand the user inside an app with a dead token.
                 clearSessions();
                 window.location.reload();
                 return;
               }
-              // Mirror the session row into both apps' auth.sessions BEFORE the
-              // handoff. App pages validate the JWT by signature, but edge
-              // functions call auth.getUser(), which checks the LOCAL sessions
-              // table — without this, a cross-app fallback token loads the app
-              // fine yet every edge function returns 401 non-2xx. Idempotent;
-              // non-fatal if it fails (worst case = old behaviour).
+              // Mirror the (verified-live) session into both apps' auth.sessions
+              // so the receiving app's getUser/edge functions accept it even
+              // when it was issued by the sibling. Idempotent, non-fatal.
               try {
                 await fetch("/admin-api/sso/mirror-session", {
                   method: "POST",
