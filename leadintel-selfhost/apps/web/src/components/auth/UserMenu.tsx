@@ -33,7 +33,12 @@ export function UserMenu({ onOpenSettings, compact }: UserMenuProps) {
   async function handleLogout() {
     setOpen(false);
     await signOut();
-    navigate("/login", { replace: true });
+    // Land on the platform launcher (the "main" login), not this app's own
+    // login page. Fallback to /login only when no launcher is configured
+    // (e.g. standalone dev).
+    const launcher = import.meta.env.VITE_LAUNCHER_URL as string | undefined;
+    if (launcher) window.location.href = launcher;
+    else navigate("/login", { replace: true });
   }
 
   function handleChangePassword() {

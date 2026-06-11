@@ -69,6 +69,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     localStorage.clear();
     setWho(null);
+    // Land on the platform launcher (the "main" login) instead of re-rendering
+    // this app's own login page. Falls through to the local login only when no
+    // launcher is configured (standalone dev).
+    const launcher = import.meta.env.VITE_LAUNCHER_URL as string | undefined;
+    if (launcher) window.location.href = launcher;
   }, []);
 
   return <AuthCtx.Provider value={{ session, loading, who, refreshWho, signOut }}>{children}</AuthCtx.Provider>;

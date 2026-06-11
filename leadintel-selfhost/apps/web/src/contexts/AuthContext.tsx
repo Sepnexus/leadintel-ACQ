@@ -39,6 +39,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOut() {
     await supabase.auth.signOut();
+    // Also drop cross-app SSO artifacts (peer tokens + handoff session copies)
+    // so a stale token can't re-hydrate a session after logout.
+    try {
+      Object.keys(localStorage).forEach(k => {
+        if (k.startsWith("cc_peer_") || k.startsWith("cc_sso_") || k.startsWith("sb-")) {
+          localStorage.removeItem(k);
+        }
+      });
+    } catch { /* noop */ }
   }
 
   return (
