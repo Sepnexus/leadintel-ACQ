@@ -22,6 +22,7 @@ import { stripeWebhook } from "./routes/stripe-webhook.ts";
 import { getSyncSchedule, updateSyncSchedule, runSyncJobNow } from "./routes/sync-schedule.ts";
 import { startSyncScheduler } from "./lib/sync-scheduler.ts";
 import { startWalletMirror } from "./lib/wallet-mirror.ts";
+import { startAutoRecharge } from "./lib/auto-recharge.ts";
 import {
   listMyCustomers, listMyTeam, inviteToTeam, removeFromTeam,
   getMyBilling, getMyConnections, getMyActivity, setAutoRecharge,
@@ -177,6 +178,7 @@ console.log(`[admin-api] listening on :${PORT}`);
 
 startSyncScheduler();
 startWalletMirror();
+startAutoRecharge();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
