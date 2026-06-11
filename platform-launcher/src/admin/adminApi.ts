@@ -241,6 +241,28 @@ export const adminApi = {
       headers: { ...authHeader(), "Content-Type": "application/json" },
       body: JSON.stringify({ password }),
     })),
+  // Create a brand-new platform user (optionally a super-admin) with a password.
+  createUser: (p: { email: string; password: string; full_name?: string; is_platform_admin?: boolean }) =>
+    jsonOr<{
+      ok: true; user_id: string; email: string; is_platform_admin: boolean;
+      bridges: {
+        platform:  { ok: boolean; created?: boolean; error?: string };
+        acq:       { ok: boolean; created?: boolean; error?: string };
+        leadintel: { ok: boolean; created?: boolean; error?: string };
+      };
+      note: string;
+    }>(fetch(`${BASE}/users`, {
+      method: "POST",
+      headers: { ...authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify(p),
+    })),
+  // Grant/revoke the platform super-admin flag.
+  setPlatformAdmin: (id: string, is_platform_admin: boolean) =>
+    jsonOr<{ ok: true; user_id: string; is_platform_admin: boolean }>(fetch(`${BASE}/users/${id}/platform-admin`, {
+      method: "PATCH",
+      headers: { ...authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ is_platform_admin }),
+    })),
   // Per-user access toggles were removed. Access derives from customer membership
   // — manage on the Customers page. setUserAccess removed.
   setupStatus: (id: string) => jsonOr<{

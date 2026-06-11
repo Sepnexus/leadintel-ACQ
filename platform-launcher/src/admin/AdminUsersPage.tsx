@@ -59,6 +59,8 @@ export function AdminUsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,7 +73,7 @@ export function AdminUsersPage() {
       else      setError(r.error);
     }, 200);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [q]);
+  }, [q, reloadKey]);
 
   if (selected) return <UserDetailView userId={selected} onBack={() => setSelected(null)} />;
 
@@ -84,16 +86,33 @@ export function AdminUsersPage() {
             {users.length} user{users.length === 1 ? "" : "s"} · click any row to edit access
           </div>
         </div>
-        <input
-          value={q} onChange={e => setQ(e.target.value)}
-          placeholder="Search by email or name…"
-          style={{
-            background: COLORS.B2, color: COLORS.TEXT, border: `1px solid ${COLORS.B3}`,
-            borderRadius: 8, padding: "10px 14px", fontSize: 13, fontFamily: FONT,
-            width: 280, outline: "none",
-          }}
-        />
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <input
+            value={q} onChange={e => setQ(e.target.value)}
+            placeholder="Search by email or name…"
+            style={{
+              background: COLORS.B2, color: COLORS.TEXT, border: `1px solid ${COLORS.B3}`,
+              borderRadius: 8, padding: "10px 14px", fontSize: 13, fontFamily: FONT,
+              width: 280, outline: "none",
+            }}
+          />
+          <button
+            onClick={() => setCreateOpen(true)}
+            style={{
+              background: COLORS.GREEN, border: "none", borderRadius: 8,
+              padding: "10px 16px", color: "#fff", fontSize: 13, fontWeight: 600,
+              cursor: "pointer", fontFamily: FONT, whiteSpace: "nowrap",
+            }}
+          >+ New user</button>
+        </div>
       </div>
+
+      {createOpen && (
+        <CreateUserModal
+          onClose={() => setCreateOpen(false)}
+          onCreated={() => { setCreateOpen(false); setReloadKey(k => k + 1); }}
+        />
+      )}
 
       {error && <ErrorBanner>{error}</ErrorBanner>}
 
@@ -168,6 +187,8 @@ function UserDetailView({ userId, onBack }: { userId: string; onBack: () => void
   const [detail, setDetail] = useState<UserDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pwOpen, setPwOpen] = useState(false);
+  const [adminBusy, setAdminBusy] = useState(false);
+  const [adminErr, setAdminErr] = useState<string | null>(null);
 
   async function load() {
     const r = await adminApi.getUser(userId);
@@ -227,6 +248,24 @@ function UserDetailView({ userId, onBack }: { userId: string; onBack: () => void
               }}
               title="Force-set this user's password across all backends"
             >🔑 Set password</button>
+            <button
+              onClick={async () => {
+                setAdminErr(null); setAdminBusy(true);
+                const r = await adminApi.setPlatformAdmin(userId, !isAdmin);
+                setAdminBusy(false);
+                if (r.ok) load(); else setAdminErr(r.error);
+              }}
+              disabled={adminBusy}
+              style={{
+                background: isAdmin ? "rgba(192,57,43,0.10)" : "rgba(255,200,80,0.10)",
+                border: `1px solid ${isAdmin ? "#c0392b" : "rgba(255,200,80,0.5)"}`,
+                borderRadius: 6, padding: "6px 12px",
+                color: isAdmin ? "#ff7a7a" : "#ffc966",
+                fontSize: 12, cursor: adminBusy ? "not-allowed" : "pointer",
+                fontFamily: FONT, whiteSpace: "nowrap",
+              }}
+              title={isAdmin ? "Remove platform super-admin access" : "Grant full platform super-admin access"}
+            >{adminBusy ? "Saving…" : isAdmin ? "Revoke platform admin" : "★ Make platform admin"}</button>
           </div>
         </div>
       </div>
@@ -240,6 +279,7 @@ function UserDetailView({ userId, onBack }: { userId: string; onBack: () => void
       )}
 
       {error && <ErrorBanner>{error}</ErrorBanner>}
+      {adminErr && <ErrorBanner>{adminErr}</ErrorBanner>}
 
       <Section title="Effective Access (derived from customer)">
         <div style={{ padding: "14px 20px", color: COLORS.T2, fontSize: 12, borderBottom: `1px solid ${COLORS.B2}`, lineHeight: 1.6 }}>
@@ -298,6 +338,137 @@ function UserDetailView({ userId, onBack }: { userId: string; onBack: () => void
           ))
         }
       </Section>
+    </div>
+  );
+}
+
+// ─── CreateUserModal ─────────────────────────────────────────────────────────
+// Mint a brand-new platform user with a password — optionally a full platform
+// super-admin. Writes platform-auth + ACQ + LI in one call (same plumbing as
+// Set Password), so the person can log in at the launcher immediately.
+function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [email, setEmail] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [superAdmin, setSuperAdmin] = useState(true);
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<{ email: string; is_platform_admin: boolean; note: string } | null>(null);
+
+  const emailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+  const tooShort = pw.length > 0 && pw.length < 8;
+  const mismatch = pw2.length > 0 && pw !== pw2;
+  const canSubmit = !busy && !done && emailOk && pw.length >= 8 && pw === pw2;
+
+  async function submit() {
+    setErr(null); setBusy(true);
+    const r = await adminApi.createUser({
+      email: email.trim(), password: pw,
+      full_name: fullName.trim() || undefined,
+      is_platform_admin: superAdmin,
+    });
+    setBusy(false);
+    if (!r.ok) { setErr(r.error); return; }
+    setDone({ email: r.data.email, is_platform_admin: r.data.is_platform_admin, note: r.data.note });
+  }
+
+  const inputStyle = (bad: boolean) => ({
+    width: "100%", padding: "10px 12px", boxSizing: "border-box" as const,
+    background: COLORS.BG, border: `1px solid ${bad ? "#c0392b" : COLORS.B3}`,
+    borderRadius: 6, color: COLORS.TEXT, fontSize: 14, fontFamily: FONT, marginBottom: 4,
+  });
+  const labelStyle = { display: "block", fontSize: 11, color: COLORS.T3, marginTop: 14, marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase" as const, fontWeight: 600 };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, fontFamily: FONT,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: COLORS.S1, border: `1px solid ${COLORS.B3}`, borderRadius: 12,
+        padding: 24, width: 480, maxWidth: "90vw", boxShadow: "0 24px 64px rgba(0,0,0,0.45)",
+      }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>New user</div>
+        <div style={{ fontSize: 12, color: COLORS.T3, marginBottom: 4 }}>
+          Creates a login across platform-auth + ACQ + LI in one go.
+        </div>
+
+        {done ? (
+          <>
+            <div style={{
+              padding: "12px 14px", borderRadius: 6, marginTop: 12,
+              background: "rgba(78,125,61,0.08)", border: `1px solid ${COLORS.GREEN}`, fontSize: 13,
+            }}>
+              <div style={{ color: COLORS.TEXT, fontWeight: 600 }}>
+                ✓ {done.email} created{done.is_platform_admin ? " as a platform super-admin" : ""}.
+              </div>
+              <div style={{ color: COLORS.T3, fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>{done.note}</div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
+              <button onClick={onCreated} style={{
+                background: COLORS.GREEN, border: "none", borderRadius: 6,
+                padding: "8px 18px", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: FONT,
+              }}>Done</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <label style={{ ...labelStyle, marginTop: 16 }}>Email</label>
+            <input value={email} onChange={e => setEmail(e.target.value)} placeholder="new.admin@example.com" autoFocus
+              style={inputStyle(email.length > 0 && !emailOk)} />
+
+            <label style={labelStyle}>Full name <span style={{ textTransform: "none", color: COLORS.T3 }}>(optional)</span></label>
+            <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Jane Doe" style={inputStyle(false)} />
+
+            <label style={labelStyle}>Password</label>
+            <input type={show ? "text" : "password"} value={pw} onChange={e => setPw(e.target.value)}
+              placeholder="At least 8 characters" style={{ ...inputStyle(tooShort), fontFamily: "ui-monospace, monospace" }} />
+            {tooShort && <div style={{ fontSize: 11, color: "#c0392b", marginBottom: 8 }}>Too short — minimum 8 characters.</div>}
+
+            <label style={labelStyle}>Confirm password</label>
+            <input type={show ? "text" : "password"} value={pw2} onChange={e => setPw2(e.target.value)}
+              placeholder="Type it again" style={{ ...inputStyle(mismatch), fontFamily: "ui-monospace, monospace" }} />
+            {mismatch && <div style={{ fontSize: 11, color: "#c0392b", marginBottom: 8 }}>Passwords don't match.</div>}
+
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: COLORS.T3, marginTop: 10, cursor: "pointer" }}>
+              <input type="checkbox" checked={show} onChange={e => setShow(e.target.checked)} style={{ cursor: "pointer" }} />
+              Show password
+            </label>
+
+            <label style={{
+              display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginTop: 16,
+              padding: "12px 14px", borderRadius: 8, cursor: "pointer",
+              background: superAdmin ? "rgba(255,200,80,0.08)" : COLORS.B2,
+              border: `1px solid ${superAdmin ? "rgba(255,200,80,0.4)" : COLORS.B3}`,
+            }}>
+              <input type="checkbox" checked={superAdmin} onChange={e => setSuperAdmin(e.target.checked)} style={{ cursor: "pointer" }} />
+              <span style={{ color: COLORS.TEXT, fontWeight: 600 }}>Platform super-admin</span>
+              <span style={{ color: COLORS.T3, fontSize: 12 }}>— full access to every customer + this admin panel</span>
+            </label>
+
+            {err && (
+              <div style={{
+                marginTop: 12, padding: "10px 12px", borderRadius: 6,
+                background: "rgba(192,57,43,0.10)", border: "1px solid #c0392b", color: "#ff7a7a", fontSize: 12,
+              }}>{err}</div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
+              <button onClick={onClose} disabled={busy} style={{
+                background: "transparent", border: `1px solid ${COLORS.B3}`, borderRadius: 6,
+                padding: "8px 14px", color: COLORS.T2, fontSize: 13, cursor: busy ? "not-allowed" : "pointer", fontFamily: FONT,
+              }}>Cancel</button>
+              <button onClick={submit} disabled={!canSubmit} style={{
+                background: canSubmit ? COLORS.GREEN : COLORS.B2, border: "none", borderRadius: 6,
+                padding: "8px 18px", color: canSubmit ? "#fff" : COLORS.T3, fontSize: 13, fontWeight: 600,
+                cursor: canSubmit ? "pointer" : "not-allowed", fontFamily: FONT, minWidth: 130,
+              }}>{busy ? "Creating…" : "Create user"}</button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
