@@ -125,7 +125,8 @@ async function checkOne(
 
   let totalNotes = 0;
   let sampleNote: string | null = null;
-  let unauthorized = false;
+  let okReads = 0;
+  let authFails = 0;
   let lastError: string | null = null;
 
   for (const id of ids) {
@@ -133,14 +134,20 @@ async function checkOne(
     try {
       const { status, notes } = await fetchNotesForContact(id, tenant.ghl_pit_token);
       if (status === 401 || status === 403) {
-        unauthorized = true;
-        lastError = `HTTP ${status}`;
-        break;
+        // Per-contact 401/403 usually means THIS contact row is stale (GHL:
+        // "token does not have access to this location" for ids that were
+        // merged/deleted or belong to an old location) — it does NOT prove the
+        // token lacks the notes scope. Keep sampling; only if EVERY contact
+        // auth-fails do we call it a scope problem.
+        authFails++;
+        lastError = `HTTP ${status} (contact ${id})`;
+        continue;
       }
       if (status >= 400) {
         lastError = `HTTP ${status}`;
         continue;
       }
+      okReads++;
       totalNotes += notes.length;
       if (!sampleNote) {
         for (const n of notes) {
@@ -156,7 +163,10 @@ async function checkOne(
     }
   }
 
-  const accessible = !unauthorized;
+  // Scope is proven by ANY successful notes read. Only when zero contacts
+  // could be read AND at least one auth-failed do we report no-scope.
+  // (All-4xx-but-not-auth keeps the old behaviour: scope not disproven.)
+  const accessible = okReads > 0 || authFails === 0;
   const exist = accessible && totalNotes > 0;
 
   await admin
