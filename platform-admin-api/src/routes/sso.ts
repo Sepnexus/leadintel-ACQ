@@ -37,17 +37,24 @@ export async function mirrorSession(req: Request): Promise<Response> {
     return json({ error: "bad_token", reason: "missing session_id or sub" }, 400);
   }
 
-  // Read the canonical row from platform-auth (also validates token authenticity:
-  // if session_id isn't in the platform-auth table, the JWT can't have been
-  // freshly issued by it).
-  const rows = await sql<any[]>`
+  // Read the canonical row from whichever GoTrue issued the token. Originally
+  // this only checked platform-auth, but the launcher's cross-app fallback can
+  // hand an APP-issued token to the sibling app (shared JWT secret): pages work
+  // (PostgREST validates by signature) but edge functions call auth.getUser(),
+  // which checks the LOCAL auth.sessions — so the session row must be mirrored
+  // into every backend the token may be presented to. Searching all three DBs
+  // preserves the authenticity check: if session_id isn't in ANY issuer's
+  // table, the JWT wasn't freshly issued by us.
+  const FIND = (db: any) => db`
     SELECT id, user_id, created_at, updated_at, factor_id, aal, not_after, refreshed_at, user_agent, ip, tag
     FROM auth.sessions WHERE id = ${sessionId}::uuid LIMIT 1
   `;
-  if (rows.length === 0) {
-    return json({ error: "session_not_in_platform_auth" }, 404);
+  let s: any = (await FIND(sql))[0] ?? null;
+  if (!s && acqSql) { try { s = (await FIND(acqSql))[0] ?? null; } catch { /* bridge down — keep looking */ } }
+  if (!s && liSql)  { try { s = (await FIND(liSql))[0]  ?? null; } catch { /* bridge down — keep looking */ } }
+  if (!s) {
+    return json({ error: "session_not_found_in_any_issuer" }, 404);
   }
-  const s = rows[0];
 
   const mirror = async (db: any) => {
     if (!db) return { skipped: true, reason: "bridge_unavailable" };

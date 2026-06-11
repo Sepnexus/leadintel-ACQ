@@ -356,6 +356,18 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin, onOpenAccount }: {
                 window.location.reload();
                 return;
               }
+              // Mirror the session row into both apps' auth.sessions BEFORE the
+              // handoff. App pages validate the JWT by signature, but edge
+              // functions call auth.getUser(), which checks the LOCAL sessions
+              // table — without this, a cross-app fallback token loads the app
+              // fine yet every edge function returns 401 non-2xx. Idempotent;
+              // non-fatal if it fails (worst case = old behaviour).
+              try {
+                await fetch("/admin-api/sso/mirror-session", {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${s.access_token}` },
+                });
+              } catch { /* non-fatal */ }
               window.location.href = buildSsoLink(p.url, s, { [peerKey]: getSession(peerKey) });
             };
 
