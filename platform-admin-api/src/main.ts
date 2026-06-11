@@ -21,6 +21,7 @@ import { getSetupStatus } from "./routes/setup-status.ts";
 import { stripeWebhook } from "./routes/stripe-webhook.ts";
 import { getSyncSchedule, updateSyncSchedule, runSyncJobNow } from "./routes/sync-schedule.ts";
 import { startSyncScheduler } from "./lib/sync-scheduler.ts";
+import { startWalletMirror } from "./lib/wallet-mirror.ts";
 import {
   listMyCustomers, listMyTeam, inviteToTeam, removeFromTeam,
   getMyBilling, getMyConnections, getMyActivity, setAutoRecharge,
@@ -175,6 +176,7 @@ Deno.serve({ port: PORT }, async (req) => {
 console.log(`[admin-api] listening on :${PORT}`);
 
 startSyncScheduler();
+startWalletMirror();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
