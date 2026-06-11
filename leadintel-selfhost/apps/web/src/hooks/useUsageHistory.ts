@@ -59,12 +59,16 @@ export function useUsageHistory(tenantId: string | null): UsageHistoryState {
           .gte("created_at", since)
           .order("created_at", { ascending: false })
           .limit(500),
-        supabase
-          .from("wallet_transactions")
-          .select("id, created_at, type, amount_cents, balance_after_cents, description, metadata")
-          .eq("tenant_id", tenantId)
-          .order("created_at", { ascending: false })
-          .limit(50),
+        // Unified ledger (both products) via RPC — the app-local
+        // wallet_transactions only holds LI's own activity, so an ACQ-side
+        // top-up or auto-recharge that moved the SHARED balance would be
+        // invisible here. The RPC reads platform.wallet_transactions over fdw
+        // and tags each row "ACQ — " / "LI — " in description.
+        // deno-lint-ignore no-explicit-any — RPC added by migration, not yet in generated types.
+        (supabase.rpc as any)("get_unified_wallet_transactions", {
+          p_tenant_id: tenantId,
+          p_limit: 50,
+        }),
       ]);
       if (cancelled) return;
       const err = evRes.error?.message || txRes.error?.message || null;

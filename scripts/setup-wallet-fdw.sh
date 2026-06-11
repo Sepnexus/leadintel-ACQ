@@ -73,6 +73,17 @@ CREATE FOREIGN TABLE platform_fdw.wallet_transactions (
   balance_after_cents integer, reason text, stripe_session_id text, metadata jsonb
 ) SERVER platform_srv OPTIONS (schema_name 'platform', table_name 'wallet_transactions');
 
+-- READ-ONLY view of the same ledger including id/created_at. Kept separate
+-- from the write FT above: postgres_fdw sends every FT column on INSERT (local
+-- defaults, not remote), so a write table with id/created_at would ship NULLs
+-- into the remote PK. Reads need the full row; writes stay on the narrow FT.
+DROP FOREIGN TABLE IF EXISTS platform_fdw.wallet_transactions_read;
+CREATE FOREIGN TABLE platform_fdw.wallet_transactions_read (
+  id uuid, customer_id uuid, product text, type text, amount_cents integer,
+  balance_after_cents integer, reason text, stripe_session_id text, metadata jsonb,
+  created_at timestamptz
+) SERVER platform_srv OPTIONS (schema_name 'platform', table_name 'wallet_transactions');
+
 -- Smoke test the link.
 SELECT 'fdw ok, customers visible: ' || count(*)::text FROM platform_fdw.customers;
 SQL
