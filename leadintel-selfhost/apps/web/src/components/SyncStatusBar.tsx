@@ -47,12 +47,17 @@ export function SyncStatusBar() {
 
   return (
     <div style={{
-      position: "fixed", top: 0, left: 0, right: 0,
+      // Pinned to the BOTTOM — at the top it overlapped the header (app
+      // switcher, user menu) and intercepted clicks on those controls.
+      position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)",
+      maxWidth: "calc(100vw - 32px)",
       background: "linear-gradient(90deg, #4e7d3d 0%, #5a9147 100%)",
       color: "#fff", fontFamily: "'Open Sans', sans-serif", fontSize: 12,
-      padding: "6px 16px", textAlign: "center",
-      zIndex: 99999, fontWeight: 600, letterSpacing: 0.3,
-      boxShadow: "0 2px 8px rgba(0,0,0,0.4)",
+      padding: "8px 18px", textAlign: "center", borderRadius: 999,
+      zIndex: 9998, fontWeight: 600, letterSpacing: 0.3,
+      boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
+      pointerEvents: "none",  // never blocks clicks — purely informational
+      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
     }}>
       <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 999,
         background: "#fff", marginRight: 8, animation: "ccPulse 1.2s ease-in-out infinite" }} />

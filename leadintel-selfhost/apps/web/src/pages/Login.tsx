@@ -1,8 +1,10 @@
-import { useState, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { COLORS } from "@/utils/leadUtils";
+
+const LAUNCHER_URL = import.meta.env.VITE_LAUNCHER_URL as string | undefined;
 
 export default function LoginPage() {
   const { session, loading } = useAuth();
@@ -12,9 +14,25 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // In the unified platform, login is the launcher's job — an end user should
+  // never see Lead Intel's own login page. Any path that lands here without a
+  // session (sign-out from any screen, expired session, ProtectedRoute bounce,
+  // direct visit) gets sent to the launcher. Only standalone deployments with
+  // no launcher configured fall through to the local form below.
+  useEffect(() => {
+    if (!loading && !session && LAUNCHER_URL) {
+      window.location.replace(LAUNCHER_URL);
+    }
+  }, [loading, session]);
+
   if (!loading && session) {
     const dest = (location.state as { from?: string } | null)?.from || "/";
     return <Navigate to={dest} replace />;
+  }
+
+  // Redirecting to the launcher — render nothing rather than flash the form.
+  if (!loading && !session && LAUNCHER_URL) {
+    return null;
   }
 
   async function handleSubmit(e: FormEvent) {

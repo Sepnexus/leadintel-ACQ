@@ -1,12 +1,23 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import closerControlLogo from "@/assets/closer-control-logo.png";
+
+const LAUNCHER_URL = import.meta.env.VITE_LAUNCHER_URL as string | undefined;
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Unified platform: login is the launcher's job. ACQ renders this whenever
+  // there's no session (sign-out from any screen, expired/revoked token), so
+  // send the user to the launcher instead of ACQ's own login. Standalone
+  // deploys (no launcher configured) still show the local form below.
+  useEffect(() => {
+    if (LAUNCHER_URL) window.location.replace(LAUNCHER_URL);
+  }, []);
+  if (LAUNCHER_URL) return null;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
