@@ -792,18 +792,35 @@ serve(async (req) => {
     const { data: accounts, error: aErr } = await q;
     if (aErr) throw aErr;
 
-    const results = [];
-    for (const acc of (accounts || [])) {
-      // ── Platform entitlement: skip accounts whose org has acq_coach disabled ──
-      const hasAccess = await acqAccountHasAccess(acc.id, "acq_coach");
-      if (!hasAccess) {
-        results.push({ account_id: acc.id, name: acc.name, status: "skipped_no_access" });
-        continue;
+    const runAll = async () => {
+      const results = [];
+      for (const acc of (accounts || [])) {
+        // ── Platform entitlement: skip accounts whose org has acq_coach disabled ──
+        const hasAccess = await acqAccountHasAccess(acc.id, "acq_coach");
+        if (!hasAccess) {
+          results.push({ account_id: acc.id, name: acc.name, status: "skipped_no_access" });
+          continue;
+        }
+        try { results.push(await syncTenant(admin, acc, trigger, trigger === "manual" ? backfillSeconds : undefined)); }
+        catch (e) { results.push({ account_id: acc.id, name: acc.name, status: "error", error: errMsg(e) }); }
       }
-      try { results.push(await syncTenant(admin, acc, trigger, trigger === "manual" ? backfillSeconds : undefined)); }
-      catch (e) { results.push({ account_id: acc.id, name: acc.name, status: "error", error: errMsg(e) }); }
+      return results;
+    };
+
+    // A scheduled sweep over ALL accounts can exceed the caller's wait budget
+    // (the platform scheduler aborts after 60s → "Signal timed out", and the
+    // half-finished request gets torn down). So for the CRON path run the sweep
+    // as a BACKGROUND task and return immediately — the same dispatch-and-return
+    // shape the Lead Intel cron uses — giving the scheduler a fast "ok" while
+    // the sync keeps running. Manual / single-account calls stay inline so the
+    // in-app "Sync now" still gets real per-account results.
+    if (isCronCall && !requestedAccountId) {
+      const work = runAll().catch((e) => console.error("[cron-sync] background sweep error:", errMsg(e)));
+      try { (globalThis as any).EdgeRuntime?.waitUntil?.(work); } catch { /* runtime without waitUntil — promise still runs */ }
+      return json({ ok: true, dispatched: (accounts || []).length, mode: "background" });
     }
 
+    const results = await runAll();
     return json({ ok: true, ran: results.length, results });
   } catch (e) {
     console.error(e);
