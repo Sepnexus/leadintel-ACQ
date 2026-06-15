@@ -292,15 +292,23 @@ async function syncContacts(mode: string) {
   const st = await getSyncState("contacts");
   let startAfter: string | undefined;
   let startAfterId: string | undefined;
+  // Timestamp marking the start of THIS full sweep. Persisted in the resume
+  // cursor so it survives across the chunked/resumed invocations of one sweep.
+  // Used by the deletion-reconcile at the end: every contact GHL still returns
+  // gets synced_at >= this; anything older was deleted in GHL.
+  let sweepStartedAt: string | undefined;
   if (typeof st?.last_delta_cursor === "string" && st.last_delta_cursor) {
     try {
       const cursor = JSON.parse(st.last_delta_cursor);
       startAfter = typeof cursor?.startAfter === "string" ? cursor.startAfter : undefined;
       startAfterId = typeof cursor?.startAfterId === "string" ? cursor.startAfterId : undefined;
+      sweepStartedAt = typeof cursor?.sweepStartedAt === "string" ? cursor.sweepStartedAt : undefined;
     } catch {
       startAfterId = st.last_delta_cursor;
     }
   }
+  // Fresh full sweep (no resume cursor yet) → stamp the start now.
+  if (mode === "full" && !sweepStartedAt) sweepStartedAt = new Date().toISOString();
   let deltaCutoff: number | null = null;
   if (mode === "delta") {
     if (st?.last_delta_sync_at) deltaCutoff = new Date(st.last_delta_sync_at).getTime();
@@ -446,8 +454,45 @@ async function syncContacts(mode: string) {
     if (stop) break;
     startAfter = meta.startAfter;
     startAfterId = meta.startAfterId;
-    await recordProgress("contacts", JSON.stringify({ startAfter, startAfterId }));
+    await recordProgress("contacts", JSON.stringify({ startAfter, startAfterId, sweepStartedAt }));
     await sleep(80);
+  }
+
+  // ---- Deletion reconcile ----
+  // When a FULL sweep COMPLETES (not timed out), remove contacts GHL no longer
+  // returns — i.e. deleted/merged in GHL — which an upsert-only sync would
+  // otherwise keep forever (the LI-count > GHL-count drift). Identified by
+  // synced_at older than this sweep's start. Heavily guarded so a GHL hiccup
+  // (e.g. an empty/short response) can NEVER mass-delete: we only prune when
+  // this sweep actually re-synced ≥90% of GHL's own reported total. Delta mode
+  // never reconciles (it only sees changed contacts).
+  if (mode === "full" && !timedOut && sweepStartedAt) {
+    try {
+      const head = await ghlFetch("/contacts/", { locationId: CURRENT_LOCATION_ID, limit: 1 });
+      const ghlTotal: number | null = typeof head?.meta?.total === "number" ? head.meta.total : null;
+      const { count: freshCount } = await admin
+        .from("ghl_contacts")
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", CURRENT_TENANT_ID)
+        .gte("synced_at", sweepStartedAt);
+      const reconcile: Record<string, any> = { ghl_total: ghlTotal, fresh_this_sweep: freshCount ?? null };
+      if (ghlTotal && ghlTotal > 0 && freshCount != null && freshCount >= Math.floor(ghlTotal * 0.9)) {
+        const { count: deleted, error } = await admin
+          .from("ghl_contacts")
+          .delete({ count: "exact" })
+          .eq("tenant_id", CURRENT_TENANT_ID)
+          .lt("synced_at", sweepStartedAt);
+        if (error) reconcile.error = error.message;
+        else { reconcile.deleted = deleted ?? 0; console.log(`syncContacts reconcile: pruned ${deleted ?? 0} contacts deleted in GHL`); }
+      } else {
+        reconcile.skipped = "guard: this sweep re-synced <90% of GHL total — not pruning";
+        console.warn(`syncContacts reconcile SKIPPED: fresh=${freshCount} ghlTotal=${ghlTotal}`);
+      }
+      stats.reconcile = reconcile;
+    } catch (e) {
+      stats.reconcile = { error: (e as Error).message };
+      console.error("syncContacts reconcile error:", (e as Error).message);
+    }
   }
 
   return { ...stats, timed_out: timedOut };
