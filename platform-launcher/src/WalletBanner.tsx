@@ -19,36 +19,48 @@ export function WalletBanner({ cfg: _cfg }: { cfg: LauncherConfig }) {
   const [combined, setCombined] = useState<number | null>(null);
   const [acq, setAcq]   = useState<number | null>(null);
   const [li, setLi]     = useState<number | null>(null);
+  const [adminScope, setAdminScope] = useState(false);  // platform-wide total?
+  const [custCount, setCustCount]   = useState(0);
 
   useEffect(() => {
     const tok = getSession("acq")?.access_token || getSession("leadintel")?.access_token;
     if (!tok) return;
     let cancelled = false;
+    const H = { Authorization: `Bearer ${tok}` };
 
     (async () => {
-      // List customers we belong to → pick the first → fetch its billing.
-      // Platform admins (multi-customer view) see the SUM across all customers.
       try {
-        const r = await fetch(`/admin-api/me/customers`, { headers: { Authorization: `Bearer ${tok}` } });
+        const r = await fetch(`/admin-api/me/customers`, { headers: H });
         if (!r.ok) return;
         const { customers, is_platform_admin } = await r.json();
         if (cancelled) return;
-        if (!customers?.length) { setCombined(0); return; }
 
-        let totalC = 0, totalAcq = 0, totalLi = 0;
-        const list = is_platform_admin ? customers : [customers[0]];
-        for (const c of list) {
-          const b = await fetch(`/admin-api/me/customer/${c.id}/billing`, { headers: { Authorization: `Bearer ${tok}` } });
-          if (!b.ok) continue;
-          const data = await b.json();
-          totalC   += data.wallet?.balance_cents ?? 0;
-          for (const u of (data.usage_30d ?? [])) {
-            if (u.product === "acq_coach")  totalAcq += u.billed ?? 0;
-            if (u.product === "lead_intel") totalLi  += u.billed ?? 0;
-          }
+        if (is_platform_admin) {
+          // Platform-wide total in ONE query — the old per-customer fan-out
+          // left the balance blank whenever any of the N calls was slow/failed.
+          const s = await fetch(`/admin-api/platform-summary`, { headers: H });
+          if (!s.ok || cancelled) return;
+          const d = await s.json();
+          setAdminScope(true);
+          setCustCount(d.customer_count ?? 0);
+          setCombined(d.total_balance_cents ?? 0);
+          setAcq(d.acq_30d_cents ?? 0);
+          setLi(d.li_30d_cents ?? 0);
+          return;
         }
-        if (cancelled) return;
-        setCombined(totalC); setAcq(totalAcq); setLi(totalLi);
+
+        // End user: their own customer's wallet.
+        if (!customers?.length) { setCombined(0); return; }
+        const c = customers[0];
+        const b = await fetch(`/admin-api/me/customer/${c.id}/billing`, { headers: H });
+        if (!b.ok || cancelled) return;
+        const data = await b.json();
+        let aa = 0, ll = 0;
+        for (const u of (data.usage_30d ?? [])) {
+          if (u.product === "acq_coach")  aa += u.billed ?? 0;
+          if (u.product === "lead_intel") ll += u.billed ?? 0;
+        }
+        setCombined(data.wallet?.balance_cents ?? 0); setAcq(aa); setLi(ll);
       } catch { /* swallow — banner just stays "—" */ }
     })();
 
@@ -69,7 +81,9 @@ export function WalletBanner({ cfg: _cfg }: { cfg: LauncherConfig }) {
           {fmt(combined)}
         </div>
         <div style={{ fontSize: 11, color: COLORS.T3, marginTop: 4 }}>
-          One wallet · used by ACQ Coach + Lead Intel
+          {adminScope
+            ? `Platform-wide · ${custCount} customer${custCount === 1 ? "" : "s"} combined`
+            : "One wallet · used by ACQ Coach + Lead Intel"}
         </div>
       </div>
       <div style={{ display: "flex", gap: 18, fontSize: 11, color: COLORS.T3, textAlign: "right" }}>

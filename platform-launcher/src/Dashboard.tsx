@@ -265,8 +265,11 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin, onOpenAccount }: {
       <main style={{ maxWidth: 760, margin: "0 auto", padding: "40px 24px 60px" }}>
         <WalletBanner cfg={cfg} />
 
-        {/* Visible CTAs to the unified Account areas — so customer admins
-            don't hunt for where "team / billing / GHL" lives. */}
+        {/* Per-customer self-service CTAs (team / billing / GHL / activity).
+            Shown only to customer admins — a platform super-admin manages all of
+            this in Admin → Customers, so these single-customer cards just clutter
+            their home. */}
+        {!isPlatformAdmin && (
         <div style={{
           display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
           gap: 10, marginBottom: 28,
@@ -294,6 +297,7 @@ export function Dashboard({ cfg, onLogout, onOpenAdmin, onOpenAccount }: {
             </a>
           ))}
         </div>
+        )}
 
         <h1 style={{ fontSize: 22, fontWeight: 800, color: COLORS.TEXT, margin: "0 0 6px", letterSpacing: "0.02em" }}>
           {greeting(userInfo.firstName)}

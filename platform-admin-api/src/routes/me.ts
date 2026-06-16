@@ -5,8 +5,31 @@
 // to customers the caller is a member of. Platform admins see everything.
 
 import { sql, acqSql, liSql } from "../db.ts";
-import { json, requireAuthedJwt } from "../auth.ts";
+import { json, requireAuthedJwt, AuthedAdmin } from "../auth.ts";
 import { ensureProvisioned, syncCustomerMemberships } from "../lib/provisioning.ts";
+
+// GET /admin-api/platform-summary — platform-wide totals for the super-admin
+// home (admin-gated in main.ts). One SQL pass over the shared ledger instead
+// of the WalletBanner's old per-customer fan-out, which left the balance blank
+// whenever any of the N calls was slow or failed.
+export async function getPlatformSummary(_req: Request, _admin: AuthedAdmin): Promise<Response> {
+  const w = (await sql<{ total: number }[]>`
+    SELECT COALESCE(SUM(balance_cents), 0)::int AS total FROM platform.customer_wallet
+  `)[0] ?? { total: 0 };
+  const cc = (await sql<{ c: number }[]>`SELECT COUNT(*)::int AS c FROM platform.customers`)[0]?.c ?? 0;
+  const usage = await sql<{ product: string; billed: number }[]>`
+    SELECT product::text AS product, COALESCE(SUM(billed_cents), 0)::int AS billed
+    FROM platform.usage_events
+    WHERE created_at > now() - interval '30 days'
+    GROUP BY product
+  `;
+  let acq = 0, li = 0;
+  for (const u of usage) {
+    if (u.product === "acq_coach")  acq = u.billed;
+    if (u.product === "lead_intel") li  = u.billed;
+  }
+  return json({ total_balance_cents: w.total, customer_count: cc, acq_30d_cents: acq, li_30d_cents: li });
+}
 
 // Helper: resolve caller's platform user info from a Bearer-token request.
 async function resolveCaller(req: Request): Promise<

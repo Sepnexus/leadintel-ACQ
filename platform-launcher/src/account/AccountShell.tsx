@@ -30,6 +30,7 @@ export function AccountShell({ cfg, onClose }: { cfg: LauncherConfig; onClose: (
   const [tab, setTabState] = useState<AccountTab>(tabFromHash);
   const [customers, setCustomers] = useState<MyCustomer[]>([]);
   const [activeCid, setActiveCid] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);  // platform super-admin
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,10 +53,18 @@ export function AccountShell({ cfg, onClose }: { cfg: LauncherConfig; onClose: (
       if (!r.ok) { setError(r.error); return; }
       setCustomers(r.data.customers);
       setActiveCid(r.data.customers[0]?.id ?? null);
+      setIsAdmin(!!r.data.is_platform_admin);
     })();
   }, []);
 
   const active = customers.find(c => c.id === activeCid);
+  // A platform super-admin has no single "account" — they manage every customer
+  // in Admin → Customers. So their Account is just their own identity: Profile
+  // only, no customer dropdown, no per-customer tabs.
+  const tabs: AccountTab[] = isAdmin
+    ? ["profile"]
+    : ["profile", "team", "billing", "connections", "activity"];
+  const effectiveTab: AccountTab = isAdmin ? "profile" : tab;
 
   return (
     <ToastProvider>
@@ -67,7 +76,9 @@ export function AccountShell({ cfg, onClose }: { cfg: LauncherConfig; onClose: (
           <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
             <button onClick={onClose} style={btnGhost}>← Back</button>
             <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: "0.02em" }}>Account</div>
-            {customers.length > 1 && active && (
+            {/* Customer dropdown only for end users — a super-admin's Account is
+                their own identity, not a customer's. */}
+            {!isAdmin && customers.length > 1 && active && (
               <select
                 value={activeCid ?? ""}
                 onChange={e => setActiveCid(e.target.value)}
@@ -80,12 +91,12 @@ export function AccountShell({ cfg, onClose }: { cfg: LauncherConfig; onClose: (
                 {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             )}
-            {customers.length === 1 && active && (
+            {!isAdmin && customers.length === 1 && active && (
               <div style={{ fontSize: 12, color: COLORS.T2 }}>{active.name}</div>
             )}
           </div>
           <div style={{ display: "flex", gap: 4 }}>
-            {(["profile", "team", "billing", "connections", "activity"] as AccountTab[]).map(t => (
+            {tabs.map(t => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -108,11 +119,11 @@ export function AccountShell({ cfg, onClose }: { cfg: LauncherConfig; onClose: (
           {loading && <div style={{ padding: 32, textAlign: "center", color: COLORS.T3 }}>Loading…</div>}
           {error  && <div style={{ padding: 14, color: "#ff7a7a", fontSize: 13 }}>{error}</div>}
 
-          {!loading && tab === "profile" && <ProfileTab cfg={cfg} />}
-          {!loading && tab === "team"        && activeCid && <TeamTab        cid={activeCid} customer={active!} />}
-          {!loading && tab === "billing"     && activeCid && <BillingTab     cid={activeCid} customer={active!} />}
-          {!loading && tab === "connections" && activeCid && <ConnectionsTab cid={activeCid} customer={active!} />}
-          {!loading && tab === "activity"    && activeCid && <ActivityTab    cid={activeCid} customer={active!} />}
+          {!loading && effectiveTab === "profile" && <ProfileTab cfg={cfg} />}
+          {!loading && !isAdmin && effectiveTab === "team"        && activeCid && <TeamTab        cid={activeCid} customer={active!} />}
+          {!loading && !isAdmin && effectiveTab === "billing"     && activeCid && <BillingTab     cid={activeCid} customer={active!} />}
+          {!loading && !isAdmin && effectiveTab === "connections" && activeCid && <ConnectionsTab cid={activeCid} customer={active!} />}
+          {!loading && !isAdmin && effectiveTab === "activity"    && activeCid && <ActivityTab    cid={activeCid} customer={active!} />}
         </main>
       </div>
     </ToastProvider>

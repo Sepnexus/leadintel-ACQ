@@ -26,6 +26,7 @@ import { startAutoRecharge } from "./lib/auto-recharge.ts";
 import {
   listMyCustomers, listMyTeam, inviteToTeam, removeFromTeam,
   getMyBilling, getMyConnections, getMyActivity, setAutoRecharge,
+  getPlatformSummary,
 } from "./routes/me.ts";
 import { createTopupSession, createBillingPortalSession } from "./routes/topup.ts";
 
@@ -58,6 +59,7 @@ const routes: Route[] = [
   { method: "POST",  pattern: /^\/admin-api\/users\/([0-9a-f-]+)\/password\/?$/, handler: setUserPassword },
   { method: "PATCH", pattern: /^\/admin-api\/users\/([0-9a-f-]+)\/platform-admin\/?$/, handler: setPlatformAdmin },
   { method: "GET",   pattern: /^\/admin-api\/audit\/?$/,                  handler: listAudit },
+  { method: "GET",   pattern: /^\/admin-api\/platform-summary\/?$/,        handler: getPlatformSummary },
   { method: "GET",   pattern: /^\/admin-api\/platform-settings\/keys\/?$/, handler: listPlatformKeys },
   { method: "GET",    pattern: /^\/admin-api\/platform-settings\/master-keys\/?$/,             handler: listMasterKeys },
   { method: "PUT",    pattern: /^\/admin-api\/platform-settings\/master-keys\/([A-Z0-9_]+)\/?$/, handler: setMasterKey },
