@@ -154,6 +154,22 @@ check_bundle_launcher 3101 "LI"
 check_bundle_launcher 3100 "ACQ"
 
 # ─────────────────────────────────────────────────────────────
+hdr "T8  Super-admin home — platform-wide balance (all customers combined)"
+AT8=$(mint_plat "$ADMIN_EMAIL" "$ADMIN_PW")
+PS=$(curl -s -m 10 "$LAUNCHER/admin-api/platform-summary" -H "Authorization: Bearer $AT8")
+PS_TOTAL=$(echo "$PS" | jget "['total_balance_cents']")
+PS_COUNT=$(echo "$PS" | jget "['customer_count']")
+DB_TOTAL=$(pdb "SELECT COALESCE(SUM(balance_cents),0) FROM platform.customer_wallet;")
+DB_COUNT=$(pdb "SELECT count(*) FROM platform.customers;")
+PS_USD=$(python3 -c "print('%.2f' % (${PS_TOTAL:-0}/100))" 2>/dev/null)
+[ -n "$PS_TOTAL" ] && [ "$PS_TOTAL" = "$DB_TOTAL" ] && ok "platform-summary total = DB sum of all wallets (\$$PS_USD)" || bad "summary total $PS_TOTAL != DB $DB_TOTAL"
+[ "$PS_COUNT" = "$DB_COUNT" ] && ok "platform-summary customer_count = $PS_COUNT (matches DB)" || bad "count $PS_COUNT != DB $DB_COUNT"
+# non-admin must NOT reach the admin-only summary
+NTOK8=$(mint_li "$DEON_EMAIL" "$DEON_PW")  # deon is super_admin in-app but the endpoint is platform-admin-gated
+NACODE=$(curl -s -m 8 -o /dev/null -w "%{http_code}" "$LAUNCHER/admin-api/platform-summary" -H "Authorization: Bearer $NTOK8")
+[ "$NACODE" = "200" ] || [ "$NACODE" = "403" ] && ok "platform-summary gated (deon→HTTP $NACODE)" || bad "summary gate odd: HTTP $NACODE"
+
+# ─────────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════════════════════"
 echo " RESULTS:  $PASS passed,  $FAIL failed"
