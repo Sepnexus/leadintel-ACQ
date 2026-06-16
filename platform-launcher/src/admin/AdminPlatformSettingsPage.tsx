@@ -382,7 +382,7 @@ function SyncSchedulePanel() {
         const statusRunning = j.last_status === "running";
         return (
           <div key={j.job_name} style={{
-            display: "grid", gridTemplateColumns: "minmax(220px,1.2fr) 150px 1fr 200px",
+            display: "grid", gridTemplateColumns: "minmax(200px,1.1fr) 220px minmax(150px,1fr) 190px",
             padding: "13px 20px", borderTop: i === 0 ? "none" : `1px solid ${COLORS.B2}`,
             alignItems: "center", gap: 12,
           }}>
