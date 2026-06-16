@@ -101,16 +101,16 @@ async function checkOne(
     return base;
   }
 
-  // Sample a wider window: tenants with un-reconciled stale rows can have many
-  // recently-added contacts that GHL already deleted. 25 makes it very likely
-  // we hit at least one contact GHL still has, which is all we need to prove
-  // the notes scope.
+  // Sample a wide window ordered by most-recently-UPDATED (recently-worked
+  // contacts are the ones likely to have notes — newest-ADDED are fresh leads
+  // with none yet). A wide pool also rides over un-reconciled stale rows that
+  // GHL has deleted.
   const { data: contacts, error: cErr } = await admin
     .from("ghl_contacts")
     .select("ghl_contact_id")
     .eq("tenant_id", tenant.id)
-    .order("ghl_date_added", { ascending: false, nullsFirst: false })
-    .limit(25);
+    .order("ghl_date_updated", { ascending: false, nullsFirst: false })
+    .limit(60);
 
   if (cErr) {
     base.error = `db: ${cErr.message}`;
@@ -140,8 +140,10 @@ async function checkOne(
   let scopeFails = 0;    // genuine 401/403 (NOT the stale-contact kind) → real scope problem
   let staleSkips = 0;    // contact gone from GHL → ignored, not a scope signal
   let lastError: string | null = null;
+  const MAX_LIVE_READS = 15;   // how many existing contacts to check for notes before giving up
 
   for (const id of ids) {
+    if (totalNotes > 0 || okReads >= MAX_LIVE_READS) break; // found notes, or sampled enough live ones
     base.contacts_checked++;
     try {
       const { status, notes, message } = await fetchNotesForContact(id, tenant.ghl_pit_token);
@@ -154,7 +156,10 @@ async function checkOne(
             if (body) { sampleNote = body.slice(0, 200); break; }
           }
         }
-        break; // one clean read proves the scope — stop hammering stale rows
+        // NOTE: do NOT break on the first clean read — that contact may simply
+        // have no notes. Keep checking live contacts until we find a note (or
+        // hit MAX_LIVE_READS), so "no notes" reflects a real sample, not one row.
+        continue;
       }
       if ((status === 403 || status === 404) && STALE_CONTACT_RE.test(message)) {
         staleSkips++;                 // stale contact, not a scope problem
