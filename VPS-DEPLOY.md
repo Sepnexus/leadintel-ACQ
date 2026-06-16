@@ -225,11 +225,24 @@ Admin → Users to give yourself + your team real passwords.
 > VPS. See `leadintel-selfhost/CLAUDE.md`.
 >
 > Until that's fixed in the image (see Open issues below), use the safe
-> recipe **for code-only updates to Lead Intel**:
+> recipe **for code-only updates to Lead Intel**.
+>
+> ⚠️ **This VPS host has NO `npm`/Node** — `npm run build` fails with
+> `command not found`. Build the frontend *inside Docker* (`docker compose
+> build` only builds an image; it never starts or recreates the running
+> container, so the DB is untouched), then extract and hot-copy the dist:
 >
 > ```bash
-> cd /root/sepnexus-platform/leadintel-selfhost/apps/web && npm run build
-> docker cp dist/. leadintel:/var/www/html/
+> cd /root/sepnexus-platform
+> # 1. Build image only (bakes correct prod VITE URLs from the env). DB untouched.
+> docker compose --env-file .env.vps -f docker-compose.vps.yml build leadintel
+> # 2. Extract dist via a throwaway, NEVER-started container (start.sh never runs):
+> cid=$(docker create leadintel:latest)
+> rm -rf /tmp/li-dist && docker cp "$cid":/var/www/html/. /tmp/li-dist && docker rm "$cid"
+> # 3. (optional) confirm prod API baked in — expect api-leadintel.<host>:
+> grep -rao 'api-leadintel[a-zA-Z0-9.\-]*' /tmp/li-dist/assets/ | head -1
+> # 4. Hot-copy into the RUNNING container + reload:
+> docker cp /tmp/li-dist/. leadintel:/var/www/html/
 > docker exec leadintel nginx -s reload
 > ```
 >
