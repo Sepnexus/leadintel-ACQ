@@ -296,6 +296,7 @@ const btnDanger: React.CSSProperties = {
 // ── Sync Schedule (scheduler runs inside admin-api; settings in platform-db) ─
 
 function SyncSchedulePanel() {
+  const toast = useToast();
   const [jobs, setJobs] = useState<SyncJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -323,13 +324,25 @@ function SyncSchedulePanel() {
 
   async function saveInterval(job: SyncJob) {
     const raw = draftIntervals[job.job_name];
+    if (raw === undefined || raw === String(job.interval_minutes)) return; // nothing changed
     const v = parseInt(raw ?? "", 10);
-    if (!Number.isFinite(v) || v < 1 || v > 1440) { setError("Interval must be 1–1440 minutes"); return; }
+    if (!Number.isFinite(v) || v < 1 || v > 1440) {
+      setError("Interval must be a whole number of minutes between 1 and 1440 (24h).");
+      toast.error("Interval must be 1–1440 minutes");
+      return;
+    }
     setBusy(job.job_name);
     const r = await adminApi.updateSyncJob(job.job_name, { interval_minutes: v });
     setBusy(null);
-    if (!r.ok) setError(r.error);
-    else { setDraftIntervals(d => { const c = { ...d }; delete c[job.job_name]; return c; }); load(); }
+    if (!r.ok) {
+      setError(r.error);
+      toast.error(`Couldn't save: ${r.error}`);
+    } else {
+      setDraftIntervals(d => { const c = { ...d }; delete c[job.job_name]; return c; });
+      setError(null);
+      toast.success(`${job.label} now runs every ${v} min`);
+      load();
+    }
   }
 
   async function runNow(job: SyncJob) {
@@ -384,6 +397,9 @@ function SyncSchedulePanel() {
                 type="number" min={1} max={1440}
                 value={draftIntervals[j.job_name] ?? String(j.interval_minutes)}
                 onChange={e => setDraftIntervals(d => ({ ...d, [j.job_name]: e.target.value }))}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); saveInterval(j); } }}
+                onBlur={() => saveInterval(j)}
+                title="Type a value and press Enter (or click away) to save"
                 style={{
                   width: 56, padding: "5px 8px", background: COLORS.BG,
                   border: `1px solid ${COLORS.B3}`, borderRadius: 6,
