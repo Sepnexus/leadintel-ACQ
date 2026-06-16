@@ -101,81 +101,85 @@ export function HeaderStrip({
   const aiLabel =
     aiStatus === "ready" ? "AI ready" : aiStatus === "analyzing" ? "AI analyzing…" : "AI exhausted";
 
+  const pillBase: React.CSSProperties = {
+    display: "inline-flex", alignItems: "center", gap: 6,
+    borderRadius: 999, padding: "5px 11px", fontSize: 11, fontFamily: "inherit",
+  };
+
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 8, flexWrap: isMobile ? "wrap" : "nowrap" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <img src="/assets/closer-control-logo.png" alt="Closer Control" style={{ height: isMobile ? 24 : 30 }} />
-        <span style={{ fontSize: 9, fontWeight: 600, color: COLORS.GRN, background: COLORS.GRN + "15", border: "1px solid " + COLORS.GRN + "25", borderRadius: 4, padding: "1px 6px" }}>AI</span>
+    <div style={{ marginBottom: 18 }}>
+      {/* Row 1 — brand + workspace / identity controls */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: 12, flexWrap: "wrap", paddingBottom: 12,
+        borderBottom: "1px solid " + COLORS.B1, marginBottom: 12,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <img src="/assets/closer-control-logo.png" alt="Closer Control" style={{ height: isMobile ? 24 : 30 }} />
+          <span style={{ fontSize: 9, fontWeight: 700, color: COLORS.GRN, background: COLORS.GRN + "15", border: "1px solid " + COLORS.GRN + "25", borderRadius: 4, padding: "2px 6px", letterSpacing: "0.04em" }}>AI</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {userMenu}
+        </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        {/* Sync pill */}
-        <button
-          onClick={handleSync}
-          disabled={syncing || !tenantId}
-          title={!tenantId ? "Select a tenant to sync" : "Click refresh to sync now"}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 6,
-            background: sc + "10", border: "1px solid " + sc + "35",
-            borderRadius: 999, padding: "5px 10px",
-            color: sc, fontSize: 10.5, fontFamily: "inherit",
-            cursor: syncing || !tenantId ? "default" : "pointer",
-            opacity: !tenantId ? 0.5 : 1,
-          }}
-        >
-          <span style={{
-            display: "inline-block", width: 12, height: 12,
-            animation: syncing ? "spin 0.9s linear infinite" : "none",
-          }}>↻</span>
-          {syncing ? "Syncing…" : ageLabel(mins)}
-        </button>
-
-        {/* AI pill */}
-        <div style={{ position: "relative" }}>
+      {/* Row 2 — working toolbar: status pills (left) · actions (right) */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {/* Sync pill */}
           <button
-            onClick={() => { setAiPopover((v) => !v); onAiPillClick?.(); }}
+            onClick={handleSync}
+            disabled={syncing || !tenantId}
+            title={!tenantId ? "Select a tenant to sync" : "Click to sync now"}
             style={{
-              display: "inline-flex", alignItems: "center", gap: 6,
-              background: aiColor + "10", border: "1px solid " + aiColor + "35",
-              borderRadius: 999, padding: "5px 10px",
-              color: aiColor, fontSize: 10.5, fontFamily: "inherit", cursor: "pointer",
+              ...pillBase,
+              background: sc + "10", border: "1px solid " + sc + "35", color: sc,
+              cursor: syncing || !tenantId ? "default" : "pointer",
+              opacity: !tenantId ? 0.5 : 1,
             }}
           >
-            <span style={{
-              display: "inline-block", width: 6, height: 6, borderRadius: "50%",
-              background: aiColor,
-              animation: aiStatus === "analyzing" ? "pulse-glow 1.5s infinite" : "none",
-            }} />
-            {aiLabel}
+            <span style={{ display: "inline-block", width: 12, height: 12, animation: syncing ? "spin 0.9s linear infinite" : "none" }}>↻</span>
+            {syncing ? "Syncing…" : ageLabel(mins)}
           </button>
-          {aiPopover && aiStatus === "exhausted" && (
-            <div style={{
-              position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 20,
-              width: 240, background: COLORS.S2, border: "1px solid " + COLORS.B2,
-              borderRadius: 10, padding: "10px 12px", fontSize: 11, color: COLORS.T2,
-              lineHeight: 1.5,
-            }}>
-              AI credits exhausted. Add funds in Workspace → Usage.
-            </div>
-          )}
+
+          {/* AI pill */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => { setAiPopover((v) => !v); onAiPillClick?.(); }}
+              style={{ ...pillBase, background: aiColor + "10", border: "1px solid " + aiColor + "35", color: aiColor, cursor: "pointer" }}
+            >
+              <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: aiColor, animation: aiStatus === "analyzing" ? "pulse-glow 1.5s infinite" : "none" }} />
+              {aiLabel}
+            </button>
+            {aiPopover && aiStatus === "exhausted" && (
+              <div style={{
+                position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 20,
+                width: 240, background: COLORS.S2, border: "1px solid " + COLORS.B2,
+                borderRadius: 10, padding: "10px 12px", fontSize: 11, color: COLORS.T2, lineHeight: 1.5,
+              }}>
+                AI credits exhausted. Add funds in Workspace → Usage.
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Rep selector */}
-        <select
-          value={repFilter}
-          onChange={(e) => onRepChange(e.target.value)}
-          style={{ background: COLORS.S2, border: "1px solid " + COLORS.B1, borderRadius: 8, color: COLORS.T2, fontSize: 11, padding: "5px 10px", fontFamily: "inherit", outline: "none", cursor: "pointer" }}
-        >
-          {reps.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Rep selector */}
+          <select
+            value={repFilter}
+            onChange={(e) => onRepChange(e.target.value)}
+            style={{ background: COLORS.S2, border: "1px solid " + COLORS.B1, borderRadius: 8, color: COLORS.T2, fontSize: 11, padding: "6px 10px", fontFamily: "inherit", outline: "none", cursor: "pointer" }}
+          >
+            {reps.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
 
-        <button
-          onClick={onAddLead}
-          style={{ background: "transparent", border: "1px solid " + COLORS.B2, borderRadius: 8, padding: "5px 12px", color: COLORS.T2, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}
-        >
-          + Add Lead
-        </button>
-        {userMenu}
+          <button
+            onClick={onAddLead}
+            style={{ background: COLORS.GRN, border: "1px solid " + COLORS.GRN, borderRadius: 8, padding: "6px 14px", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+          >
+            + Add Lead
+          </button>
+        </div>
       </div>
     </div>
   );
