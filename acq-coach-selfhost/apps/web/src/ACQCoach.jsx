@@ -363,7 +363,7 @@ function Bars({scores,height=56}){
         return(
           <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
             {isLast&&<div style={{fontSize:12,color:GREEN,fontWeight:700,letterSpacing:"0.06em"}}>{v}</div>}
-            <div style={{width:"100%",height:h,background:isLast?GREEN:"#1e2e1e",borderRadius:"2px 2px 0 0"}}/>
+            <div style={{width:"100%",height:h,background:isLast?GREEN:GREEN+"55",borderRadius:"2px 2px 0 0"}}/>
           </div>
         );
       })}
@@ -382,17 +382,17 @@ function TalkBar({rep,seller,showLegend=true}){
         </div>
       )}
       <div style={{height:24,borderRadius:5,overflow:"hidden",display:"flex",position:"relative"}}>
-        <div style={{width:`${rep}%`,background:"#1e3a1e",display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:6,transition:"width .6s"}}>
+        <div style={{width:`${rep}%`,background:B2,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:6,transition:"width .6s"}}>
           <span style={{fontSize:13,fontWeight:700,color:TEXT,whiteSpace:"nowrap",opacity:.7}}>{rep}% Rep</span>
         </div>
-        <div style={{width:`${seller}%`,background:GREEN,display:"flex",alignItems:"center",paddingLeft:6,transition:"width .6s",opacity:selOk?.9:.6}}>
-          <span style={{fontSize:13,fontWeight:700,color:TEXT,whiteSpace:"nowrap"}}>{seller}% Seller</span>
+        <div style={{width:`${seller}%`,background:GREEN,display:"flex",alignItems:"center",paddingLeft:6,transition:"width .6s",opacity:selOk?1:.75}}>
+          <span style={{fontSize:13,fontWeight:700,color:"#fff",whiteSpace:"nowrap"}}>{seller}% Seller</span>
         </div>
         <div style={{position:"absolute",left:"40%",top:0,bottom:0,width:1,background:GREEN,opacity:.3}}/>
       </div>
       {showLegend&&(
         <div style={{display:"flex",gap:12,marginTop:4}}>
-          {[["#1e3a1e","Rep"],["#4e7d3d","Seller"],["#4e7d3d","60% target"]].map(([c,l],i)=>(
+          {[[B2,"Rep"],[GREEN,"Seller"],[GREEN,"60% target"]].map(([c,l],i)=>(
             <div key={i} style={{display:"flex",alignItems:"center",gap:4,fontSize:13,color:T3}}>
               <div style={{width:i===2?2:7,height:i===2?10:7,background:c,border:`1px solid ${B1}`,borderRadius:i===2?1:2}}/>
               {l}
@@ -420,13 +420,13 @@ function WaveformBar({transcript}){
           const pct=Math.max((s.words/total)*100,0.4);
           return(
             <div key={i} title={`${s.isRep?"Rep":"Seller"}: ${s.words} words`}
-              style={{flex:`0 0 ${pct}%`,background:s.isRep?"#1e3a1e":GREEN+(s.isRep?"":"50"),
+              style={{flex:`0 0 ${pct}%`,background:s.isRep?B2:GREEN+(s.isRep?"":"50"),
                 borderTop:`2px solid ${s.isRep?DKGREEN:GREEN}`,minWidth:1.5,cursor:"default"}}/>
           );
         })}
       </div>
       <div style={{display:"flex",gap:16,marginTop:5}}>
-        {[["#1e3a1e","Rep talk"],[GREEN,"Seller talk"]].map(([c,l])=>(
+        {[[B2,"Rep talk"],[GREEN,"Seller talk"]].map(([c,l])=>(
           <div key={l} style={{display:"flex",alignItems:"center",gap:5,fontSize:13,color:T3}}>
             <div style={{width:7,height:7,background:c,border:`1px solid ${B1}`,borderRadius:2}}/>
             {l}
@@ -2472,12 +2472,12 @@ function RoleplayMode({onBack}){
               </button>
               {brief&&(
                 <div className="fade" style={{display:"flex",flexDirection:"column",gap:8}}>
-                  <div style={{background:"#0a0f0a",border:"1px solid #4e7d3d22",borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{background:GREEN+"14",border:"1px solid #4e7d3d22",borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"10px 12px"}}>
                     <div style={{fontSize:12,color:GREEN,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:6}}>Key Discovery Questions</div>
                     {brief.questions?.map((q,i)=><div key={i} style={{fontSize:13,color:TEXT,lineHeight:1.7}}>{i+1}. {q}</div>)}
                   </div>
                   {brief.objections?.map((o,i)=>(
-                    <div key={i} style={{background:"#0f0a0a",border:"1px solid #c0392b22",borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"10px 12px"}}>
+                    <div key={i} style={{background:RED+"14",border:"1px solid #c0392b22",borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"10px 12px"}}>
                       <div style={{fontSize:12,color:RED,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:4}}>Objection {i+1}</div>
                       <div style={{fontSize:13,color:TEXT,fontStyle:"italic",lineHeight:1.6,marginBottom:6}}>"{o.objection}"</div>
                       <div style={{fontSize:12,color:GREEN,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:3}}>Rebuttal</div>
@@ -2485,11 +2485,11 @@ function RoleplayMode({onBack}){
                     </div>
                   ))}
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    <div style={{background:"#0f0d08",border:"1px solid #b7860b22",borderLeft:`3px solid ${AMBER}`,borderRadius:8,padding:"10px 12px"}}>
+                    <div style={{background:AMBER+"14",border:"1px solid #b7860b22",borderLeft:`3px solid ${AMBER}`,borderRadius:8,padding:"10px 12px"}}>
                       <div style={{fontSize:12,color:AMBER,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:4}}>Tone</div>
                       <div style={{fontSize:13,color:TEXT,lineHeight:1.6}}>{brief.tone}</div>
                     </div>
-                    <div style={{background:"#0f0a0a",border:"1px solid #c0392b22",borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"10px 12px"}}>
+                    <div style={{background:RED+"14",border:"1px solid #c0392b22",borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"10px 12px"}}>
                       <div style={{fontSize:12,color:RED,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:4}}>Never Say</div>
                       <div style={{fontSize:13,color:TEXT,fontStyle:"italic",lineHeight:1.6}}>"{brief.neverSay}"</div>
                     </div>
@@ -3212,7 +3212,7 @@ function Sidebar({reps,selectedRep,onSelect,onLeaderboard,accountId,onResumeSetu
               </div>
               <Bars scores={rep.scores} height={26}/>
               <div style={{marginTop:5,height:8,borderRadius:3,overflow:"hidden",display:"flex"}}>
-                <div style={{width:`${lt.r}%`,background:"#1e3a1e"}}/>
+                <div style={{width:`${lt.r}%`,background:B2}}/>
                 <div style={{width:`${lt.s}%`,background:GREEN,opacity:.5}}/>
               </div>
               <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
@@ -3227,7 +3227,7 @@ function Sidebar({reps,selectedRep,onSelect,onLeaderboard,accountId,onResumeSetu
         <button onClick={onLeaderboard} style={{width:"100%",background:"transparent",border:`1px solid ${B3}`,borderRadius:6,padding:"7px",color:T2,fontSize:12,fontWeight:600,cursor:"pointer",marginBottom:7}}>View Leaderboard</button>
         <button
           onClick={()=>{setDigestMsg(null);setDigestOpen(true);}}
-          style={{width:"100%",background:"#0a0f0a",border:`1px solid ${B1}`,borderLeft:`3px solid ${GREEN}`,
+          style={{width:"100%",background:GREEN+"14",border:`1px solid ${B1}`,borderLeft:`3px solid ${GREEN}`,
             borderRadius:6,padding:"7px 10px",textAlign:"left",cursor:"pointer",
             transition:"border-color .12s"}}
           onMouseEnter={e=>{e.currentTarget.style.borderColor=GREEN;e.currentTarget.style.borderLeftColor=GREEN;}}
@@ -4572,7 +4572,7 @@ function Dashboard({rep,calls,reps,onScore,onScoreCall,onViewReport,onPractice,p
       </div>
 
       {bestRep.id===rep.id&&(
-        <div style={{background:"#0a0f0a",border:`1px solid ${B1}`,borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+        <div style={{background:GREEN+"14",border:`1px solid ${B1}`,borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
           <div style={{width:28,height:28,borderRadius:6,background:S2,border:`1px solid ${B1}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:900,color:GREEN,flexShrink:0}}>↑</div>
           <div>
             <div style={{fontSize:13,fontWeight:700,color:GREEN,marginBottom:2}}>Most Improved This Week</div>
@@ -4869,7 +4869,7 @@ function Report({result,onBack}){
   const rp=parseInt(detected.repTalkRatio)||40;
   const sp=parseInt(detected.sellerTalkRatio)||60;
 
-  const drillBgs={[RED]:"#0f0a0a",[GREEN]:"#0a0f0a",[AMBER]:"#0f0d08"};
+  const drillBgs={[RED]:RED+"14",[GREEN]:GREEN+"14",[AMBER]:AMBER+"14"};
 
   return(
     <div style={{overflowY:"auto",padding:"20px 24px 48px",flex:1}} className="fade">
@@ -4897,7 +4897,7 @@ function Report({result,onBack}){
             {strengths.length>0&&(
               <div style={{marginTop:10,display:"flex",flexWrap:"wrap",gap:5}}>
                 {strengths.map((s,i)=>(
-                  <div key={i} style={{background:"#0a0f0a",border:`1px solid ${GREEN}25`,borderRadius:6,padding:"3px 9px",fontSize:12,color:GREEN}}>{s}</div>
+                  <div key={i} style={{background:GREEN+"14",border:`1px solid ${GREEN}25`,borderRadius:6,padding:"3px 9px",fontSize:12,color:GREEN}}>{s}</div>
                 ))}
               </div>
             )}
@@ -4978,7 +4978,7 @@ function Report({result,onBack}){
                           <div style={{fontSize:12.5,color:T2,lineHeight:1.7,fontStyle:"italic"}}>"{m.transcript_quote}"</div>
                         </div>
                       )}
-                      <div style={{background:"#0a0f0a",border:`1px solid ${GREEN}22`,borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"12px 14px",marginTop:10}}>
+                      <div style={{background:GREEN+"14",border:`1px solid ${GREEN}22`,borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"12px 14px",marginTop:10}}>
                         <div style={{fontSize:12,fontWeight:700,color:GREEN,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:6}}>What to say instead</div>
                         <div style={{fontSize:12,color:TEXT,lineHeight:1.75,fontStyle:"italic"}}>{m.rewrite}</div>
                       </div>

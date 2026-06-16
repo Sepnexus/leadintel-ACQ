@@ -680,7 +680,7 @@ function ScorecardTab({rep}){
             {focusAreas.map(cat=>{
               const drill=DRILL_PROMPTS[cat.name];
               return(
-                <div key={cat.name} style={{background:cat.status==="critical"?"#0f0a0a":"#0f0d08",border:`1px solid ${B1}`,borderLeft:`3px solid ${catColor(cat.status)}`,borderRadius:8,padding:"12px 14px"}}>
+                <div key={cat.name} style={{background:cat.status==="critical"?RED+"14":AMBER+"14",border:`1px solid ${B1}`,borderLeft:`3px solid ${catColor(cat.status)}`,borderRadius:8,padding:"12px 14px"}}>
                   <div style={{fontSize:13,fontWeight:700,color:TEXT,marginBottom:4,fontFamily:"'Open Sans',sans-serif"}}>{cat.name} — {isNaN(cat.score)?0:cat.score}/10</div>
                   {drill&&<div style={{fontSize:12,color:T2,lineHeight:1.6,fontFamily:"'Open Sans',sans-serif"}}>{drill.tip}</div>}
                 </div>
@@ -725,7 +725,7 @@ function MyCallsTab({rep,onPractice=null}){
             </div>
             {/* Talk ratio mini bar */}
             <div style={{height:16,borderRadius:4,overflow:"hidden",display:"flex"}}>
-              <div style={{width:`${call.rt}%`,background:"#1e3a1e",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <div style={{width:`${call.rt}%`,background:B2,display:"flex",alignItems:"center",justifyContent:"center"}}>
                 <span style={{fontSize:12,fontWeight:700,color:TEXT,opacity:.7}}>{call.rt}% Rep</span>
               </div>
               <div style={{width:`${call.st}%`,background:GREEN,display:"flex",alignItems:"center",justifyContent:"center",opacity:call.st>=60?.9:.6}}>
@@ -1418,12 +1418,12 @@ function RoleplayMode({onBack,seedMoment=null}){
               </button>
               {brief&&(
                 <div className="fade" style={{display:"flex",flexDirection:"column",gap:8}}>
-                  <div style={{background:"#0a0f0a",border:"1px solid #4e7d3d22",borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{background:GREEN+"14",border:"1px solid #4e7d3d22",borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"10px 12px"}}>
                     <div style={{fontSize:12,color:GREEN,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:6,fontFamily:"'Open Sans',sans-serif"}}>Key Discovery Questions</div>
                     {brief.questions?.map((q,i)=><div key={i} style={{fontSize:13,color:TEXT,lineHeight:1.7,fontFamily:"'Open Sans',sans-serif"}}>{i+1}. {q}</div>)}
                   </div>
                   {brief.objections?.map((o,i)=>(
-                    <div key={i} style={{background:"#0f0a0a",border:"1px solid #c0392b22",borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"10px 12px"}}>
+                    <div key={i} style={{background:RED+"14",border:"1px solid #c0392b22",borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"10px 12px"}}>
                       <div style={{fontSize:12,color:RED,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:4,fontFamily:"'Open Sans',sans-serif"}}>Objection {i+1}</div>
                       <div style={{fontSize:13,color:TEXT,fontStyle:"italic",lineHeight:1.6,fontFamily:"'Open Sans',sans-serif",marginBottom:6}}>"{o.objection}"</div>
                       <div style={{fontSize:12,color:GREEN,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:3,fontFamily:"'Open Sans',sans-serif"}}>Rebuttal</div>
@@ -1431,11 +1431,11 @@ function RoleplayMode({onBack,seedMoment=null}){
                     </div>
                   ))}
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    <div style={{background:"#0f0d08",border:"1px solid #b7860b22",borderLeft:`3px solid ${AMBER}`,borderRadius:8,padding:"10px 12px"}}>
+                    <div style={{background:AMBER+"14",border:"1px solid #b7860b22",borderLeft:`3px solid ${AMBER}`,borderRadius:8,padding:"10px 12px"}}>
                       <div style={{fontSize:12,color:AMBER,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:4,fontFamily:"'Open Sans',sans-serif"}}>Tone</div>
                       <div style={{fontSize:13,color:TEXT,lineHeight:1.6,fontFamily:"'Open Sans',sans-serif"}}>{brief.tone}</div>
                     </div>
-                    <div style={{background:"#0f0a0a",border:"1px solid #c0392b22",borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"10px 12px"}}>
+                    <div style={{background:RED+"14",border:"1px solid #c0392b22",borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"10px 12px"}}>
                       <div style={{fontSize:12,color:RED,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:4,fontFamily:"'Open Sans',sans-serif"}}>Never Say</div>
                       <div style={{fontSize:13,color:TEXT,fontStyle:"italic",lineHeight:1.6,fontFamily:"'Open Sans',sans-serif"}}>"{brief.neverSay}"</div>
                     </div>
@@ -1628,7 +1628,7 @@ function RoleplayMode({onBack,seedMoment=null}){
 function AIDrillCard({drill,onComplete,completed}){
   const isCritical=drill.status==="critical"||drill.status==="weak";
   const borderColor=drill.status==="critical"?RED:AMBER;
-  const bgColor=drill.status==="critical"?"#0f0a0a":"#0f0d08";
+  const bgColor=drill.status==="critical"?RED+"14":AMBER+"14";
   const labelColor=drill.status==="critical"?RED:AMBER;
   const labelStyle={fontSize:12,fontWeight:700,color:labelColor,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:4,fontFamily:"'Open Sans',sans-serif"};
 
@@ -1650,25 +1650,25 @@ function AIDrillCard({drill,onComplete,completed}){
 
       {/* SELLER SAYS */}
       <div style={labelStyle}>SELLER SAYS</div>
-      <div style={{background:"#0f0a0a",borderLeft:`2px solid ${RED}`,borderRadius:4,padding:"8px 10px",marginBottom:10}}>
+      <div style={{background:RED+"14",borderLeft:`2px solid ${RED}`,borderRadius:4,padding:"8px 10px",marginBottom:10}}>
         <div style={{fontSize:13,fontStyle:"italic",color:TEXT,lineHeight:1.6,fontFamily:"'Open Sans',sans-serif"}}>"{drill.sellerLine}"</div>
       </div>
 
       {/* YOUR GOAL */}
       <div style={labelStyle}>YOUR GOAL</div>
-      <div style={{background:"#0a0f0a",borderLeft:`2px solid ${GREEN}`,borderRadius:4,padding:"8px 10px",marginBottom:10}}>
+      <div style={{background:GREEN+"14",borderLeft:`2px solid ${GREEN}`,borderRadius:4,padding:"8px 10px",marginBottom:10}}>
         <div style={{fontSize:13,color:TEXT,lineHeight:1.7,fontFamily:"'Open Sans',sans-serif"}}>{drill.goal}</div>
       </div>
 
       {/* COACHING TIP */}
       <div style={labelStyle}>COACHING TIP</div>
-      <div style={{background:"#0f0d08",borderLeft:`2px solid ${AMBER}`,borderRadius:4,padding:"8px 10px",marginBottom:10}}>
+      <div style={{background:AMBER+"14",borderLeft:`2px solid ${AMBER}`,borderRadius:4,padding:"8px 10px",marginBottom:10}}>
         <div style={{fontSize:13,color:T2,lineHeight:1.75,fontFamily:"'Open Sans',sans-serif"}}>{drill.tip}</div>
       </div>
 
       {/* WHAT TO SAY */}
       <div style={labelStyle}>WHAT TO SAY</div>
-      <div style={{background:"#0a0f0a",border:`1px solid ${GREEN}22`,borderLeft:`2px solid ${GREEN}`,borderRadius:4,padding:"8px 10px",marginBottom:12}}>
+      <div style={{background:GREEN+"14",border:`1px solid ${GREEN}22`,borderLeft:`2px solid ${GREEN}`,borderRadius:4,padding:"8px 10px",marginBottom:12}}>
         <div style={{fontSize:12,fontStyle:"italic",color:TEXT,lineHeight:1.6,fontFamily:"'Open Sans',sans-serif"}}>"{drill.rewrite}"</div>
       </div>
 
@@ -1739,7 +1739,7 @@ function WeakSpotDrills({rep}){
     return(
       <div style={{background:S1,border:`1px solid ${B1}`,borderRadius:10,padding:"18px 16px",display:"flex",flexDirection:"column"}}>
         <div style={{fontSize:12,fontWeight:700,color:TEXT,fontFamily:"'League Spartan',sans-serif",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:10}}>Weak Spot Drills</div>
-        <div style={{background:"#0f0a0a",border:`1px solid ${B1}`,borderRadius:8,padding:"24px 16px",display:"flex",alignItems:"center",gap:10}}>
+        <div style={{background:RED+"14",border:`1px solid ${B1}`,borderRadius:8,padding:"24px 16px",display:"flex",alignItems:"center",gap:10}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:GREEN,animation:"pulse 2s infinite"}}/>
           <span style={{fontSize:13,color:T2,fontFamily:"'Open Sans',sans-serif"}}>Generating your drills…</span>
         </div>
@@ -1780,7 +1780,7 @@ function WeakSpotDrills({rep}){
           const drill=DRILL_PROMPTS[cat.name];
           const isCritical=cat.status==="critical";
           return(
-            <div key={cat.name} style={{background:isCritical?"#0f0a0a":"#0f0d08",borderLeft:`3px solid ${isCritical?RED:AMBER}`,borderRadius:6,padding:"10px 12px"}}>
+            <div key={cat.name} style={{background:isCritical?RED+"14":AMBER+"14",borderLeft:`3px solid ${isCritical?RED:AMBER}`,borderRadius:6,padding:"10px 12px"}}>
               <div style={{fontSize:12,fontWeight:700,color:TEXT,marginBottom:3,fontFamily:"'Open Sans',sans-serif"}}>{cat.name}</div>
               {drill&&<div style={{fontSize:13,color:T2,fontStyle:"italic",marginBottom:4,lineHeight:1.5,fontFamily:"'Open Sans',sans-serif"}}>"{drill.objection}"</div>}
               {drill&&<div style={{fontSize:13,color:T3,lineHeight:1.5,fontFamily:"'Open Sans',sans-serif"}}>{drill.tip}</div>}
@@ -1835,7 +1835,7 @@ function PreCallBrief({rep}){
       {brief&&!loading&&(
         <div className="fade" style={{marginTop:14,display:"flex",flexDirection:"column",gap:10}}>
           {/* Discovery Questions */}
-          <div style={{background:"#0a0f0a",border:"1px solid #4e7d3d22",borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"12px 14px"}}>
+          <div style={{background:GREEN+"14",border:"1px solid #4e7d3d22",borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"12px 14px"}}>
             <div style={{fontSize:12,color:GREEN,fontFamily:"'Open Sans',sans-serif",textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:8}}>Key Discovery Questions</div>
             {brief.questions.map((q,i)=>(
               <div key={i} style={{fontSize:12,color:TEXT,lineHeight:1.7,fontFamily:"'Open Sans',sans-serif",marginBottom:4}}>
@@ -1845,7 +1845,7 @@ function PreCallBrief({rep}){
           </div>
           {/* Objections & Rebuttals */}
           {brief.objections.map((o,i)=>(
-            <div key={i} style={{background:"#0f0a0a",border:"1px solid #c0392b22",borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"12px 14px"}}>
+            <div key={i} style={{background:RED+"14",border:"1px solid #c0392b22",borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"12px 14px"}}>
               <div style={{fontSize:12,color:RED,fontFamily:"'Open Sans',sans-serif",textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:6}}>Objection {i+1}</div>
               <div style={{fontSize:12,color:TEXT,fontStyle:"italic",lineHeight:1.7,fontFamily:"'Open Sans',sans-serif",marginBottom:8}}>"{o.objection}"</div>
               <div style={{fontSize:12,color:GREEN,fontFamily:"'Open Sans',sans-serif",textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:4}}>Rebuttal</div>
@@ -1853,12 +1853,12 @@ function PreCallBrief({rep}){
             </div>
           ))}
           {/* Emotional Tone */}
-          <div style={{background:"#0f0d08",border:"1px solid #b7860b22",borderLeft:`3px solid ${AMBER}`,borderRadius:8,padding:"12px 14px"}}>
+          <div style={{background:AMBER+"14",border:"1px solid #b7860b22",borderLeft:`3px solid ${AMBER}`,borderRadius:8,padding:"12px 14px"}}>
             <div style={{fontSize:12,color:AMBER,fontFamily:"'Open Sans',sans-serif",textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:6}}>Recommended Tone</div>
             <div style={{fontSize:12,color:TEXT,lineHeight:1.7,fontFamily:"'Open Sans',sans-serif"}}>{brief.tone}</div>
           </div>
           {/* Never Say */}
-          <div style={{background:"#0f0a0a",border:"1px solid #c0392b22",borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"12px 14px"}}>
+          <div style={{background:RED+"14",border:"1px solid #c0392b22",borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"12px 14px"}}>
             <div style={{fontSize:12,color:RED,fontFamily:"'Open Sans',sans-serif",textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:6}}>Never Say</div>
             <div style={{fontSize:12,color:TEXT,fontStyle:"italic",lineHeight:1.7,fontFamily:"'Open Sans',sans-serif"}}>"{brief.neverSay}"</div>
           </div>
@@ -2307,7 +2307,7 @@ function TrainingReportTab({rep,onRoleplay}){
         <div style={{fontSize:12,fontWeight:700,color:T3,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:14,fontFamily:"'Open Sans',sans-serif"}}>Your Strengths This Week</div>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {strengths.map(cat=>(
-            <div key={cat.name} style={{background:"#0a0f0a",border:`1px solid ${B1}`,borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"12px 14px",display:"flex",alignItems:"flex-start",gap:12}}>
+            <div key={cat.name} style={{background:GREEN+"14",border:`1px solid ${B1}`,borderLeft:`3px solid ${GREEN}`,borderRadius:8,padding:"12px 14px",display:"flex",alignItems:"flex-start",gap:12}}>
               <div style={{width:38,height:38,borderRadius:8,background:GREEN+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:800,color:GREEN,flexShrink:0,fontFamily:"'League Spartan',sans-serif"}}>{cat.avg}</div>
               <div style={{flex:1}}>
                 <div style={{fontSize:13,fontWeight:700,color:TEXT,marginBottom:3,fontFamily:"'Open Sans',sans-serif"}}>{cat.name} <span style={{color:GREEN,fontWeight:600}}>— {cat.avg}/10</span></div>
@@ -2325,7 +2325,7 @@ function TrainingReportTab({rep,onRoleplay}){
           {weaknesses.map(cat=>{
             const exampleText=cat.worstCall?`On your ${cat.worstCall.date} call with ${cat.worstCall.seller} you scored ${cat.worstScore}/10 on ${cat.name}. ${DRILL_PROMPTS[cat.name]?.tip||""}`:null;
             return(
-              <div key={cat.name} style={{background:"#0f0a0a",border:`1px solid ${B1}`,borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"12px 14px"}}>
+              <div key={cat.name} style={{background:RED+"14",border:`1px solid ${B1}`,borderLeft:`3px solid ${RED}`,borderRadius:8,padding:"12px 14px"}}>
                 <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:exampleText?6:0}}>
                   <div style={{fontSize:16,fontWeight:800,color:RED,fontFamily:"'League Spartan',sans-serif",letterSpacing:"0.04em",width:28,textAlign:"center",flexShrink:0}}>{cat.avg}</div>
                   <div style={{fontSize:13,fontWeight:700,color:TEXT,fontFamily:"'Open Sans',sans-serif"}}>{cat.name} <span style={{color:RED,fontWeight:600}}>— {cat.avg}/10</span></div>
@@ -2351,7 +2351,7 @@ function TrainingReportTab({rep,onRoleplay}){
                   <div style={{fontSize:13,fontWeight:700,color:TEXT,fontFamily:"'Open Sans',sans-serif"}}>{cat.name}</div>
                   <div style={{fontSize:12,fontWeight:700,color:trendCol,fontFamily:"'Open Sans',sans-serif"}}>{trendTxt}</div>
                 </div>
-                <div style={{background:"#0a0f0a",border:`1px solid ${GREEN}18`,borderLeft:`3px solid ${GREEN}`,borderRadius:6,padding:"10px 12px",marginBottom:onRoleplay?10:0}}>
+                <div style={{background:GREEN+"14",border:`1px solid ${GREEN}18`,borderLeft:`3px solid ${GREEN}`,borderRadius:6,padding:"10px 12px",marginBottom:onRoleplay?10:0}}>
                   <div style={{fontSize:11,fontWeight:700,color:GREEN,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4,fontFamily:"'Open Sans',sans-serif"}}>This Week's Drill</div>
                   <div style={{fontSize:12,color:TEXT,lineHeight:1.7,fontFamily:"'Open Sans',sans-serif"}}>{DRILLS[cat.name]||"Focus on this category in your next roleplay session."}</div>
                 </div>
