@@ -170,6 +170,18 @@ NACODE=$(curl -s -m 8 -o /dev/null -w "%{http_code}" "$LAUNCHER/admin-api/platfo
 [ "$NACODE" = "200" ] || [ "$NACODE" = "403" ] && ok "platform-summary gated (deon→HTTP $NACODE)" || bad "summary gate odd: HTTP $NACODE"
 
 # ─────────────────────────────────────────────────────────────
+hdr "T9  Notes-access check — stale contacts don't false-report NO SCOPE"
+# Pick the local tenant with the most contacts (so there's something to sample).
+BL_TENANT=$(ldb "SELECT tenant_id FROM ghl_contacts GROUP BY tenant_id ORDER BY count(*) DESC LIMIT 1;")
+echo "  sampling tenant with most contacts: $BL_TENANT"
+NTOK=$(mint_li "$DEON_EMAIL" "$DEON_PW")
+NA=$(curl -s -m 45 -X POST "$LI_API/functions/v1/check-notes-access" -H "Authorization: Bearer $NTOK" -H "apikey: $ANON_LI" -H "Content-Type: application/json" -d "{\"tenant_id\":\"$BL_TENANT\"}")
+NA_OK=$(echo "$NA" | jget "['result']['accessible']")
+NA_CHK=$(echo "$NA" | jget "['result']['contacts_checked']")
+# token genuinely has scope (verified live), so it must NOT come back False (no-scope).
+[ "$NA_OK" != "False" ] && [ -n "$NA_OK" ] && ok "notes scope NOT false-reported as no-scope (accessible=$NA_OK, checked $NA_CHK)" || bad "notes accessible=$NA_OK (must not be False): $(echo "$NA"|head -c 160)"
+
+# ─────────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════════════════════"
 echo " RESULTS:  $PASS passed,  $FAIL failed"
