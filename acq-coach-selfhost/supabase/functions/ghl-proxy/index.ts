@@ -392,6 +392,10 @@ serve(async (req) => {
         const allowed = Array.from(new Set([...adminAccountIds, ...repAccountIds]));
         if (!allowed.length) return jsonResponse({ accounts: [] });
         q = q.in("id", allowed);
+      } else if (body.scope_account_id) {
+        // Super-admin impersonating a single customer: scope to just that
+        // account so the impersonated session can't see other customers'.
+        q = q.eq("id", body.scope_account_id);
       }
       const { data, error } = await q;
       if (error) throw error;

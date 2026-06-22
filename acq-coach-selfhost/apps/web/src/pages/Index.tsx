@@ -178,7 +178,7 @@ function ACQCoachWithTeamButton({ accountId, onTeam, onBilling, onRepAs, onSignO
         )}
       </div>
 
-      <ACQCoach isSuperAdmin={isSuperAdmin} />
+      <ACQCoach isSuperAdmin={isSuperAdmin} impersonateAccountId={accountId} />
     </div>
   );
 }

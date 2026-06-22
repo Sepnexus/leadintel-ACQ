@@ -746,7 +746,7 @@ function CallScoreCard({score,onPractice=null}){
 }
 
 // ── ACCOUNT MANAGEMENT ────────────────────────────────────────────────────────
-function AccountManagement({onBack,isSuperAdmin=false}){
+function AccountManagement({onBack,isSuperAdmin=false,scopeAccountId=null}){
   const [accounts,setAccounts]=useState([]);
   const [loading,setLoading]=useState(true);
   const [adding,setAdding]=useState(false);
@@ -773,7 +773,7 @@ function AccountManagement({onBack,isSuperAdmin=false}){
   };
 
   useEffect(()=>{
-    call({action:"list-accounts"}).then(d=>{setAccounts(d.accounts||[]);setLoading(false);}).catch(()=>setLoading(false));
+    call({action:"list-accounts",scope_account_id:scopeAccountId}).then(d=>{setAccounts(d.accounts||[]);setLoading(false);}).catch(()=>setLoading(false));
   },[]);
 
   async function addAccount(){
@@ -5009,7 +5009,10 @@ function Report({result,onBack}){
 }
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
-export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
+export default function ACQCoach({onSwitchView,isSuperAdmin=false,impersonateAccountId=null}){
+  // When a super-admin is impersonating a customer, lock the whole session to
+  // that one account (list-accounts, picker, selected account). Null otherwise.
+  const scopeAccountId = isSuperAdmin && impersonateAccountId ? impersonateAccountId : null;
   const [theme,setTheme]=useState(()=>{try{return localStorage.getItem("acqcoach_theme")||"dark";}catch(e){return"dark";}});
   function toggleTheme(){const next=theme==="dark"?"light":"dark";applyTheme(next);setTheme(next);}
   const [reps,setReps]=useState([]);
@@ -5056,12 +5059,15 @@ export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
         const r = await fetch(`${SUPABASE_URL}/functions/v1/ghl-proxy`,{
           method:"POST",
           headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`,apikey: SUPABASE_KEY},
-          body:JSON.stringify({action:"list-accounts"}),
+          body:JSON.stringify({action:"list-accounts",scope_account_id:scopeAccountId}),
         });
         const d = await r.json();
         const accs=d.accounts||[];
         setGhlAccounts(accs);
-        if(accs.length>0){
+        if(scopeAccountId){
+          // Impersonating a customer: lock to that one account, ignore last-used.
+          setSelectedAccount(scopeAccountId);
+        } else if(accs.length>0){
           // Restore last-selected account if it's still in the list; else use first
           let saved=null;
           try{saved=localStorage.getItem(LS_ACCT_KEY);}catch(e){}
@@ -5733,7 +5739,7 @@ export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
             {view==="roleplay"&&
               <RoleplayMode onBack={()=>setView("dashboard")}/>}
             {view==="accounts"&&
-              <AccountManagement onBack={()=>setView("dashboard")} isSuperAdmin={isSuperAdmin}/>}
+              <AccountManagement onBack={()=>setView("dashboard")} isSuperAdmin={isSuperAdmin} scopeAccountId={scopeAccountId}/>}
             {view==="settings"&&
               <SettingsView
                 playbook={playbook} onSavePlaybook={setPlaybook}
