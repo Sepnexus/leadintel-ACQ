@@ -125,19 +125,28 @@ async function ghlFetch(path: string, params: Record<string, string | number | u
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
-  const res = await fetch(url.toString(), {
-    signal: AbortSignal.timeout(25_000),
-    headers: {
-      Authorization: `Bearer ${CURRENT_PIT}`,
-      Version: GHL_VERSION,
-      Accept: "application/json",
-    },
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`GHL ${res.status} ${path}: ${body}`);
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(25_000),
+      headers: {
+        Authorization: `Bearer ${CURRENT_PIT}`,
+        Version: GHL_VERSION,
+        Accept: "application/json",
+      },
+    });
+    // GHL rate limit — honor Retry-After (or back off) and retry a few times so
+    // a transient 429 doesn't kill the whole resource sync (e.g. opportunities).
+    if (res.status === 429 && attempt < 4) {
+      const retryAfter = Number(res.headers.get("Retry-After")) || 0;
+      await sleep(retryAfter > 0 ? retryAfter * 1000 : 1000 * (attempt + 1));
+      continue;
+    }
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`GHL ${res.status} ${path}: ${body}`);
+    }
+    return res.json();
   }
-  return res.json();
 }
 
 function cfMap(customFields: any[] | undefined): Record<string, any> {
@@ -258,6 +267,35 @@ async function recordFailure(resource: string, err: string) {
     },
     { onConflict: "tenant_id,resource" },
   );
+}
+
+// ---------- Concurrency lock (one sweep per tenant at a time) ----------
+// Prevents the scheduled sweep, the resume job, and self-resume from stacking
+// up on the same tenant. A root sweep generates a sweep_id and claims the lock;
+// chained/resume children pass the same sweep_id and re-claim (extend) it. The
+// lock carries a TTL so an edge crash can never deadlock a tenant.
+const SWEEP_TTL_SEC = 300;
+async function claimSweepLock(sweepId: string): Promise<boolean> {
+  const { data, error } = await admin.rpc("try_claim_sync_lock", {
+    p_tenant: CURRENT_TENANT_ID,
+    p_sweep: sweepId,
+    p_ttl_seconds: SWEEP_TTL_SEC,
+  });
+  if (error) {
+    // Fail OPEN — never block all syncing because the lock subsystem hiccuped
+    // (e.g. the migration hasn't applied yet). Worst case is the old behavior.
+    console.warn(`claimSweepLock error (proceeding without lock): ${error.message}`);
+    return true;
+  }
+  return data === true;
+}
+async function releaseSweepLock(sweepId: string): Promise<void> {
+  await admin
+    .from("sync_locks")
+    .delete()
+    .eq("tenant_id", CURRENT_TENANT_ID)
+    .eq("sweep_id", sweepId)
+    .then(() => {}, () => {});
 }
 
 // ---------- Contacts sync ----------
@@ -1122,7 +1160,7 @@ async function syncTasks(mode: string) {
 }
 
 // ---------- Notes sync ----------
-async function syncNotes(_mode: string) {
+async function syncNotes(mode: string) {
   const stats = {
     contacts_scanned: 0,
     notes_pulled: 0,
@@ -1137,18 +1175,27 @@ async function syncNotes(_mode: string) {
 
   const st = await getSyncState("notes");
   let cursor: string = typeof st?.last_delta_cursor === "string" ? st.last_delta_cursor : "";
+  // Incremental: in delta mode only re-pull notes for contacts CHANGED since the
+  // last notes sync — adding/editing a note bumps the contact's dateUpdated in
+  // GHL (and the contacts sync runs before notes in the chain, refreshing it).
+  // Full mode (the periodic reconcile) walks every contact. This is the single
+  // biggest GHL-API-load cut: ~all-contacts-per-sweep -> ~changed-contacts.
+  const deltaCutoffIso: string | null =
+    mode === "delta" && typeof st?.last_delta_sync_at === "string" ? st.last_delta_sync_at : null;
   const contactsWithNewNotes = new Set<string>();
 
   while (true) {
     if (Date.now() - startedAt > TIME_BUDGET_MS) { timedOut = true; break; }
 
-    const { data: contacts, error } = await admin
+    let cq = admin
       .from("ghl_contacts")
       .select("ghl_contact_id")
       .eq("tenant_id", CURRENT_TENANT_ID)
       .gt("ghl_contact_id", cursor)
       .order("ghl_contact_id", { ascending: true })
       .limit(PAGE);
+    if (deltaCutoffIso) cq = cq.gt("ghl_date_updated", deltaCutoffIso);
+    const { data: contacts, error } = await cq;
     if (error) throw new Error(`notes: read contacts: ${error.message}`);
     if (!contacts || contacts.length === 0) break;
 
@@ -1247,6 +1294,7 @@ function dispatchInternalSync(
   mode: "full" | "delta",
   triggerSource = "background_internal",
   chain: Array<"contacts" | "opportunities" | "conversations" | "users" | "messages" | "tasks" | "notes" | "pipelines"> = [],
+  sweepId?: string,
 ) {
   runInBackground(
     fetch(`${SUPABASE_URL}/functions/v1/ghl-sync`, {
@@ -1263,6 +1311,7 @@ function dispatchInternalSync(
         _internal: true,
         trigger_source: triggerSource,
         _chain: chain,
+        _sweep_id: sweepId,
       }),
     })
       .then(async (res) => {
@@ -1291,6 +1340,8 @@ Deno.serve(async (req) => {
   let resource: "contacts" | "opportunities" | "conversations" | "users" | "messages" | "tasks" | "notes" | "pipelines" | "all" = "all";
   let chain: SyncResource[] = [];
   let historyRowId: string | null = null;
+  let sweepId = "";
+  let lockClaimed = false;
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -1311,6 +1362,9 @@ Deno.serve(async (req) => {
     chain = Array.isArray(body?._chain)
       ? body._chain.filter((r: unknown): r is SyncResource => typeof r === "string" && SYNC_RESOURCES.includes(r as SyncResource))
       : [];
+    // A root call has no _sweep_id and mints one; chained/resume children carry
+    // the sweep_id so they re-claim (extend) the same tenant lock.
+    sweepId = (typeof body?._sweep_id === "string" && body._sweep_id) ? body._sweep_id : crypto.randomUUID();
 
     // Resolve tenant context — sync ALWAYS requires a tenant_id.
     // Internal background self-invocation uses service-role auth + ?_internal flag.
@@ -1408,6 +1462,22 @@ Deno.serve(async (req) => {
       }
     }
 
+    // One sweep per tenant. Claim (root) or extend (child, same sweep_id) the
+    // lock. If a DIFFERENT live sweep already holds this tenant, skip quietly —
+    // this is what stops the scheduled sweep + resume + self-resume stacking up.
+    if (!(await claimSweepLock(sweepId))) {
+      return new Response(
+        JSON.stringify({
+          skipped: true,
+          reason: "another sync is already running for this tenant",
+          tenant_id: resolvedTenantId,
+          resource,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    lockClaimed = true;
+
     if (body?.trigger_initial === true) {
       console.log(`Initial sync starting for tenant ${resolvedTenantId}`);
     }
@@ -1487,6 +1557,7 @@ Deno.serve(async (req) => {
       }
     };
 
+    let dispatchedContinuation = false;
     if (resource === "all") {
       // "all" can exceed the 150s edge limit even when individual resources
       // self-budget. Dispatch a dependency-ordered chain and return immediately.
@@ -1498,7 +1569,8 @@ Deno.serve(async (req) => {
         "messages",
         "tasks",
         "notes",
-      ]);
+      ], sweepId);
+      dispatchedContinuation = true;
       stats.all = {
         dispatched: true,
         note: "Sync chain started in background to avoid edge timeout.",
@@ -1507,14 +1579,20 @@ Deno.serve(async (req) => {
     } else {
       const result = await runResource(resource);
       if (isInternal && result?.timed_out) {
-        dispatchInternalSync(resolvedTenantId, resource, mode, "background_internal", chain);
+        dispatchInternalSync(resolvedTenantId, resource, mode, "background_internal", chain, sweepId);
+        dispatchedContinuation = true;
         stats.resume = { dispatched: true, resource };
       } else if (isInternal && chain.length > 0) {
         const [nextResource, ...rest] = chain;
-        dispatchInternalSync(resolvedTenantId, nextResource, mode, "background_internal", rest);
+        dispatchInternalSync(resolvedTenantId, nextResource, mode, "background_internal", rest, sweepId);
+        dispatchedContinuation = true;
         stats.next = { dispatched: true, resource: nextResource };
       }
     }
+    // Release the tenant lock when the sweep is fully done. If a continuation
+    // was dispatched, that child re-claims/extends the lock; otherwise this is
+    // the terminal invocation, so free the tenant for the next sweep.
+    if (lockClaimed && !dispatchedContinuation) { await releaseSweepLock(sweepId); lockClaimed = false; }
 
     // Mark sync_history row complete
     if (historyRowId) {
@@ -1539,6 +1617,9 @@ Deno.serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
+    // Free the tenant lock so a failed resource doesn't block the next sweep for
+    // the full TTL. (No-op if we never claimed it.)
+    if (lockClaimed) { await releaseSweepLock(sweepId); lockClaimed = false; }
     // Mark sync_history row failed if we created one
     if (historyRowId) {
       const errMsg = e instanceof Error ? e.message : String(e);
