@@ -25,8 +25,9 @@ const LI_BASE  = Deno.env.get("LI_FUNCTIONS_BASE_URL")  ?? "http://leadintel:543
 
 export const JOBS: Record<string, { url: string; label: string }> = {
   acq_sync:       { url: `${ACQ_BASE}/functions/v1/cron-sync`,             label: "ACQ Coach — calls + scoring sync" },
-  li_full_sync:   { url: `${LI_BASE}/functions/v1/sync-all-tenants-cron`,  label: "Lead Intel — full sweep (all tenants)" },
+  li_full_sync:   { url: `${LI_BASE}/functions/v1/sync-all-tenants-cron`,  label: "Lead Intel — delta sweep (all tenants)" },
   li_resume_sync: { url: `${LI_BASE}/functions/v1/sync-resume-cron`,       label: "Lead Intel — resume stuck syncs" },
+  li_reconcile:   { url: `${LI_BASE}/functions/v1/sync-reconcile-cron`,    label: "Lead Intel — reconcile (prune deleted contacts)" },
 };
 
 interface JobRow {
