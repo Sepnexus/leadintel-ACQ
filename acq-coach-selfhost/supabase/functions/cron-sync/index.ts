@@ -479,10 +479,9 @@ async function runPipelineForTenant(admin: any, account: any, ghlHeaders: Record
   // 2. Fetch GHL transcripts for indexed calls (>= minSeconds, no transcript yet).
   // Only pull calls that have never been transcribed (status "indexed"). We do
   // NOT re-select "no_transcript" here — retrying them every run kept failures
-  // at the top and starved recording-rich calls. (A one-time reset of
-  // no_transcript -> indexed on deploy gives the old ones a fresh pass through
-  // the new Whisper->Deepgram path.) Longest-first: long calls are the highest
-  // value AND the ones Whisper can't do, so they get to Deepgram promptly.
+  // at the top and starved recording-rich calls. Newest-first (coaching-relevant
+  // order): most calls are short enough for Whisper (the primary engine); only
+  // the long ones (> WHISPER_MAX_SECONDS) fall through to the Deepgram fallback.
   const { data: indexed } = await admin
     .from("ghl_calls")
     .select("id, ghl_message_id, body, call_duration, contact_id, assigned_user_id, account_id")
@@ -490,7 +489,7 @@ async function runPipelineForTenant(admin: any, account: any, ghlHeaders: Record
     .eq("status", "indexed")
     .is("transcript", null)
     .gte("call_duration", rules.minSeconds)
-    .order("call_duration", { ascending: false })
+    .order("call_date", { ascending: false })
     .limit(MAX_PIPELINE_CALLS);
 
   const txStart = Date.now();
