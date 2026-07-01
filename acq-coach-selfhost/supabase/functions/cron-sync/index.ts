@@ -60,6 +60,39 @@ function bill(providerCents: number, r: BillingRules) {
   return Math.max(1, Math.round(providerCents * m));
 }
 
+// Deepgram Nova-3 pay-as-you-go ≈ 0.43¢/min. Used ONLY as a fallback when
+// Whisper can't finish (e.g. long calls that exceed the edge wall-clock).
+const DEEPGRAM_CENTS_PER_MIN = 0.43;
+// Whisper can't transcribe very long calls within the edge wall-clock (it would
+// burn ~2 min per call and strand the sweep), so above this length we skip
+// straight to Deepgram. Whisper stays primary for everything shorter.
+const WHISPER_MAX_SECONDS = 900;
+// Transcribe raw audio bytes via Deepgram. Streaming = fast, no 150s edge risk.
+// Returns diarized text (Rep:/Seller:) + duration, or null on any failure.
+async function deepgramTranscribe(
+  dgKey: string,
+  audioBuf: ArrayBuffer,
+  contentType: string,
+): Promise<{ text: string; durationSec: number } | null> {
+  const url = "https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&punctuate=true&diarize=true&utterances=true";
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { Authorization: `Token ${dgKey}`, "Content-Type": contentType || "audio/wav" },
+    body: audioBuf,
+  }, 120000);
+  if (!res.ok) {
+    console.log(`deepgram ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
+    return null;
+  }
+  const data = await res.json();
+  const utterances = data?.results?.utterances || [];
+  const alt = data?.results?.channels?.[0]?.alternatives?.[0];
+  const text = utterances.length
+    ? utterances.map((u: any) => `${u.speaker === 0 ? "Rep:" : "Seller:"} ${u.transcript}`).join("\n")
+    : (alt?.transcript || "");
+  return { text, durationSec: Math.round(data?.metadata?.duration || 0) };
+}
+
 
 const firstNumber = (value: unknown, fallback = 0) => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -441,19 +474,30 @@ async function runPipelineForTenant(admin: any, account: any, ghlHeaders: Record
   }
 
   const openaiKey = Deno.env.get("OPENAI_API_KEY");
+  const dgKey = Deno.env.get("DEEPGRAM_API_KEY");
 
   // 2. Fetch GHL transcripts for indexed calls (>= minSeconds, no transcript yet).
+  // Only pull calls that have never been transcribed (status "indexed"). We do
+  // NOT re-select "no_transcript" here — retrying them every run kept failures
+  // at the top and starved recording-rich calls. (A one-time reset of
+  // no_transcript -> indexed on deploy gives the old ones a fresh pass through
+  // the new Whisper->Deepgram path.) Longest-first: long calls are the highest
+  // value AND the ones Whisper can't do, so they get to Deepgram promptly.
   const { data: indexed } = await admin
     .from("ghl_calls")
     .select("id, ghl_message_id, body, call_duration, contact_id, assigned_user_id, account_id")
     .eq("account_id", account.id)
-    .in("status", ["indexed", "no_transcript"])
+    .eq("status", "indexed")
     .is("transcript", null)
     .gte("call_duration", rules.minSeconds)
-    .order("call_date", { ascending: false })
+    .order("call_duration", { ascending: false })
     .limit(MAX_PIPELINE_CALLS);
 
+  const txStart = Date.now();
+  const TX_BUDGET_MS = 90_000; // cap THIS tenant's transcription time so a large
+                               // backlog can't starve the sequential all-tenants sweep
   for (const call of (indexed || [])) {
+    if (Date.now() - txStart > TX_BUDGET_MS) break;
     let transcriptText: string | null = null;
 
     // Try GHL transcription (free)
@@ -479,8 +523,9 @@ async function runPipelineForTenant(admin: any, account: any, ghlHeaders: Record
       transcriptText = call.body;
     }
 
-    // Fallback: Whisper (paid — strict balance gate, real cost × markup)
-    if (!transcriptText && openaiKey) {
+    // Fallback: recording → Whisper (primary) → Deepgram (secondary). Paid —
+    // strict balance gate, real cost × markup.
+    if (!transcriptText && (openaiKey || dgKey)) {
       // Estimate cost up-front and refuse if balance can't cover it.
       const estSecs = Number(call.call_duration) || rules.minSeconds;
       const estProvider = whisperCost(estSecs, rules);
@@ -493,21 +538,26 @@ async function runPipelineForTenant(admin: any, account: any, ghlHeaders: Record
       }
       try {
         const recUrl = `https://services.leadconnectorhq.com/conversations/messages/${call.ghl_message_id}/locations/${account.location_id}/recording`;
-        const recRes = await fetchWithTimeout(recUrl, { headers: { Authorization: `Bearer ${account.api_key}`, Version: "2021-04-15" } }, 45000);
+        const recRes = await fetchWithTimeout(recUrl, { headers: { Authorization: `Bearer ${account.api_key}`, Version: "2021-04-15" } }, 60000);
         if (recRes.ok) {
           const audioBuf = await recRes.arrayBuffer();
           if (audioBuf.byteLength > 1000) {
-            const audioBlob = new Blob([audioBuf], { type: "audio/wav" });
-            const form = new FormData();
-            form.append("file", audioBlob, `${call.ghl_message_id}.wav`);
-            form.append("model", "whisper-1");
-            form.append("response_format", "verbose_json");
-            const wRes = await fetchWithTimeout(
-              "https://api.openai.com/v1/audio/transcriptions",
-              { method: "POST", headers: { Authorization: `Bearer ${openaiKey}` }, body: form },
-              120000,
-            );
-            if (wRes.ok) {
+            const recContentType = recRes.headers.get("content-type") || "audio/wav";
+            // Whisper first — but only for calls short enough to finish within the
+            // edge budget. Longer calls skip straight to the Deepgram fallback.
+            let wRes: Response | null = null;
+            if (openaiKey && Number(call.call_duration || 0) <= WHISPER_MAX_SECONDS) {
+              const form = new FormData();
+              form.append("file", new Blob([audioBuf], { type: "audio/wav" }), `${call.ghl_message_id}.wav`);
+              form.append("model", "whisper-1");
+              form.append("response_format", "verbose_json");
+              wRes = await fetchWithTimeout(
+                "https://api.openai.com/v1/audio/transcriptions",
+                { method: "POST", headers: { Authorization: `Bearer ${openaiKey}` }, body: form },
+                75000,
+              );
+            }
+            if (wRes && wRes.ok) {
               const wData = await wRes.json();
               const raw = (wData?.text || "").trim();
               if (raw) {
@@ -542,6 +592,48 @@ async function runPipelineForTenant(admin: any, account: any, ghlHeaders: Record
                   });
                   if (ueErr) console.log("usage_events (whisper) insert failed:", ueErr.message);
                 }
+              }
+            }
+            // ── Deepgram fallback (Whisper stays primary) ──────────────────
+            // If Whisper produced no transcript (e.g. a long call that couldn't
+            // finish within the edge budget), transcribe the SAME audio bytes via
+            // Deepgram — fast, no wall-clock issue, reuses audioBuf (no re-fetch).
+            if (!transcriptText && dgKey) {
+              try {
+                const dg = await deepgramTranscribe(dgKey, audioBuf, recContentType);
+                if (dg && dg.text.trim().length > 0) {
+                  transcriptText = `// Auto-transcribed by Deepgram (Whisper fallback).\n\n${dg.text.trim()}`;
+                  summary.transcribed++;
+                  const audioSecs = dg.durationSec || Math.round(call.call_duration || 0);
+                  const providerCostCents = (audioSecs / 60) * DEEPGRAM_CENTS_PER_MIN;
+                  const billedCents = bill(providerCostCents, rules);
+                  try {
+                    await admin.rpc("debit_wallet", {
+                      _account_id: account.id,
+                      _amount_cents: billedCents,
+                      _reason: "Transcription (Deepgram, auto fallback)",
+                      _metadata: { call_id: call.id, ghl_message_id: call.ghl_message_id, audio_seconds: audioSecs, markup: rules.markup },
+                    });
+                  } catch (_) { /* ignore */ }
+                  const { error: dgUeErr } = await admin.from("usage_events").insert({
+                    account_id: account.id,
+                    operation: "transcription",
+                    provider: "deepgram",
+                    model: "deepgram-nova-3",
+                    call_id: call.id,
+                    ghl_message_id: call.ghl_message_id,
+                    audio_seconds: audioSecs,
+                    effective_seconds: audioSecs,
+                    provider_cost_cents: providerCostCents,
+                    billed_cents: billedCents,
+                    markup_multiplier: rules.markup,
+                    status: "success",
+                    metadata: { source: "cron-sync", fallback_from: "whisper" },
+                  });
+                  if (dgUeErr) console.log("usage_events (deepgram) insert failed:", dgUeErr.message);
+                }
+              } catch (e) {
+                summary.errors.push(`deepgram ${call.ghl_message_id}: ${errMsg(e)}`);
               }
             }
           }
