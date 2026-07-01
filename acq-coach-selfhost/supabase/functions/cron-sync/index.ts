@@ -67,6 +67,10 @@ const DEEPGRAM_CENTS_PER_MIN = 0.43;
 // burn ~2 min per call and strand the sweep), so above this length we skip
 // straight to Deepgram. Whisper stays primary for everything shorter.
 const WHISPER_MAX_SECONDS = 900;
+// Only transcribe/score calls newer than this. Old calls never enter the paid
+// pipeline no matter how many the sync promotes, so a huge historical backlog
+// can't rack up cost. New calls always fall inside the window.
+const PIPELINE_MAX_AGE_DAYS = 7;
 // Transcribe raw audio bytes via Deepgram. Streaming = fast, no 150s edge risk.
 // Returns diarized text (Rep:/Seller:) + duration, or null on any failure.
 async function deepgramTranscribe(
@@ -420,6 +424,9 @@ async function syncTenant(admin: any, account: any, trigger: "cron" | "manual", 
 // ── End-to-end pipeline for one tenant ──────────────────────────────────────
 async function runPipelineForTenant(admin: any, account: any, ghlHeaders: Record<string, string>, rules: BillingRules) {
   const summary: any = { promoted: 0, transcripts_fetched: 0, transcribed: 0, scored: 0, scoring_failed: 0, skipped_short: 0, skipped_no_funds: 0, errors: [] as string[] };
+  // Recency cutoff — everything older than this is left alone (no promote, no
+  // transcribe, no score), so an old backlog can never cost money.
+  const ageCutoff = new Date(Date.now() - PIPELINE_MAX_AGE_DAYS * 86_400_000).toISOString();
 
   // 0. Mark any existing calls below the threshold as skipped_short so they
   //    stop showing up in the pending pipeline.
@@ -436,6 +443,7 @@ async function runPipelineForTenant(admin: any, account: any, ghlHeaders: Record
     .eq("account_id", account.id)
     .ilike("message_type", "%CALL%")
     .gte("call_duration", rules.minSeconds)
+    .gte("message_date", ageCutoff)
     .limit(500);
 
   if (callMsgs && callMsgs.length > 0) {
@@ -489,6 +497,7 @@ async function runPipelineForTenant(admin: any, account: any, ghlHeaders: Record
     .eq("status", "indexed")
     .is("transcript", null)
     .gte("call_duration", rules.minSeconds)
+    .gte("call_date", ageCutoff)
     .order("call_date", { ascending: false })
     .limit(MAX_PIPELINE_CALLS);
 
@@ -657,6 +666,7 @@ async function runPipelineForTenant(admin: any, account: any, ghlHeaders: Record
       .eq("account_id", account.id)
       .eq("status", "pending")
       .gte("call_duration", rules.minSeconds)
+      .gte("call_date", ageCutoff)
       .order("call_date", { ascending: false })
       .limit(MAX_PIPELINE_CALLS);
 
