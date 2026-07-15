@@ -4291,7 +4291,10 @@ function Dashboard({rep,calls,reps,onScore,onScoreCall,onViewReport,onPractice,p
                         </div>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontSize:14,fontWeight:800,color:TEXT,fontFamily:"'League Spartan',sans-serif",letterSpacing:"0.03em",marginBottom:3,lineHeight:1.2}}>
-                            {f.seller_name||"Unknown Seller"}
+                            {/* Same resolved name as the Recent Calls list row (seller_name
+                                → GHL contact → lead phone → "No contact linked"), so the
+                                detail view can never disagree with the list. */}
+                            {c.seller||"No contact linked"}
                           </div>
                           <div style={{fontSize:11,color:T3,marginBottom:4}}>
                             {[f.call_type,f.seller_type].filter(Boolean).join(" · ")}
@@ -5104,18 +5107,54 @@ export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
         // so all reads go through the standard path — RLS, joins, counts all work.
         const usersRes=await proxy("list-users");
         const users=usersRes.users||[];
-        const [scoresRes, contactsRes, pendingCallsRes] = await Promise.all([
+        const [scoresRes, contactsRes, pendingCallsRes, scoredCallsRes] = await Promise.all([
           supabase.from("call_scores").select("*").eq("account_id",selectedAccount).order("scored_at",{ascending:false}).limit(500),
           supabase.from("ghl_contacts").select("assigned_user_id,ghl_contact_id,name").eq("account_id",selectedAccount),
-          supabase.from("ghl_calls").select("id,assigned_user_id,call_duration,call_date,transcript,contact_id,call_status").eq("account_id",selectedAccount).not("transcript","is",null).is("score_id",null).order("call_date",{ascending:false}).limit(200),
+          supabase.from("ghl_calls").select("id,assigned_user_id,call_duration,call_date,transcript,contact_id,call_status,direction,raw_data").eq("account_id",selectedAccount).not("transcript","is",null).is("score_id",null).order("call_date",{ascending:false}).limit(200),
+          // Scored calls' contact linkage. call_scores has no contact_id column, so
+          // the seller's identity lives on the ghl_calls row (score_id → contact_id).
+          // Pull it so we can recover the real name when call_scores.seller_name is blank.
+          supabase.from("ghl_calls").select("score_id,contact_id,direction,raw_data").eq("account_id",selectedAccount).not("score_id","is",null).limit(1000),
         ]);
 
         const scores=(scoresRes.data||[]);
         const contacts=(contactsRes.data||[]);
         const rawPending=(pendingCallsRes.data||[]);
-        // Build contact name lookup: ghl_contact_id → name
+        // Build contact name lookup: ghl_contact_id → name (store "" for blanks so
+        // resolveContactName below can fall through to the phone-number fallback).
         const contactNameMap={};
-        contacts.forEach(c=>{if(c.ghl_contact_id)contactNameMap[c.ghl_contact_id]=c.name||"Unknown";});
+        contacts.forEach(c=>{if(c.ghl_contact_id)contactNameMap[c.ghl_contact_id]=(c.name||"").trim();});
+
+        // Scored calls carry the seller's identity on their ghl_calls row, not on
+        // call_scores. Map call_scores.id → the linked call's contact + raw payload.
+        const scoreLinkMap={};
+        (scoredCallsRes.data||[]).forEach(c=>{
+          if(c.score_id)scoreLinkMap[c.score_id]={contactId:c.contact_id||null,direction:c.direction||"inbound",raw:c.raw_data||null};
+        });
+
+        // Pull the lead's phone from a GHL call's raw payload. Inbound → the lead is
+        // `from`; outbound → the lead is `to`. The other side may be a business name
+        // (e.g. "MJY & Associates"), so validate it actually looks like a number.
+        const isPhone=v=>typeof v==="string"&&/^\+?[0-9][0-9\s\-()]{4,}$/.test(v.trim());
+        const leadPhone=(raw,direction)=>{
+          if(!raw)return"";
+          const lead=direction==="outbound"?raw.to:raw.from;
+          if(isPhone(lead))return lead;
+          if(isPhone(raw.from))return raw.from;
+          if(isPhone(raw.to))return raw.to;
+          return"";
+        };
+        // Best-available contact name: stored seller_name → linked GHL contact name
+        // → the lead's phone number → a clean "No contact linked" (never "Unknown").
+        const resolveContactName=(rawName,contactId,raw,direction)=>{
+          const n=(rawName||"").trim();
+          if(n&&n.toLowerCase()!=="unknown")return n;
+          const byContact=contactId?(contactNameMap[contactId]||""):"";
+          if(byContact&&byContact.toLowerCase()!=="unknown")return byContact;
+          const phone=leadPhone(raw,direction);
+          if(phone)return phone;
+          return"No contact linked";
+        };
 
         // Build contact counts per ghl_user_id
         const contactCounts={};
@@ -5190,14 +5229,17 @@ export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
         try{expOverrides=JSON.parse(localStorage.getItem("cc:rep_exp_overrides")||"{}")||{};}catch(e){}
         const allReps=users.map(u=>{const r=buildRep(u);const ov=expOverrides[u.ghl_user_id];if(ov)r.exp=ov;return r;});
         // Build calls list from scores (keep full score so the dashboard can render the detailed card)
-        const callsList=scores.map((s)=>({
+        const callsList=scores.map((s)=>{
+          const link=scoreLinkMap[s.id]||{};
+          return{
           id:`cs-${s.id}`,repId:`ghl-${users.find(u=>u.ghl_user_id===s.rep_ghl_user_id)?.id||"unknown"}`,
           date:new Date(s.scored_at).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}),
-          seller:s.seller_name||"Unknown",type:s.seller_type||"Unknown",
+          seller:resolveContactName(s.seller_name,link.contactId,link.raw,link.direction),type:s.seller_type||"Unknown",
           score:s.overall_score,grade:s.grade,dur:s.duration||"N/A",
           st:s.seller_talk_ratio||50,rt:s.rep_talk_ratio||50,isNew:false,
           _full:s,
-        }));
+          };
+        });
 
         setReps(allReps);
         setCalls(callsList);
@@ -5208,8 +5250,8 @@ export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
           if(!user)return[];
           const secs=Number(c.call_duration)||0;
           const dur=secs>0?`${Math.floor(secs/60)}m ${secs%60}s`:"N/A";
-          // Look up contact name from ghl_contact_id → name map
-          const contactName=c.contact_id?contactNameMap[c.contact_id]||"Unknown":"Unknown";
+          // Contact name → phone → "No contact linked" (same resolver as scored calls)
+          const contactName=resolveContactName(null,c.contact_id,c.raw_data,c.direction);
           // Map call_status to a human-readable call type
           const callType=c.call_status==="completed"?"Inbound Call":c.call_status==="no-answer"?"No Answer":c.call_status||"Call";
           return[{
