@@ -18,6 +18,7 @@ import { refreshWallet } from "./routes/wallet.ts";
 import { mirrorSession } from "./routes/sso.ts";
 import { listMasterKeys, setMasterKey, deleteMasterKey } from "./routes/master-keys.ts";
 import { getSetupStatus } from "./routes/setup-status.ts";
+import { addCredit } from "./routes/credit.ts";
 import { stripeWebhook } from "./routes/stripe-webhook.ts";
 import { getSyncSchedule, updateSyncSchedule, runSyncJobNow } from "./routes/sync-schedule.ts";
 import { startSyncScheduler } from "./lib/sync-scheduler.ts";
@@ -68,6 +69,8 @@ const routes: Route[] = [
   { method: "PUT",    pattern: /^\/admin-api\/platform-settings\/sync-schedule\/([a-z_]+)\/?$/,        handler: updateSyncSchedule },
   { method: "POST",   pattern: /^\/admin-api\/platform-settings\/sync-schedule\/([a-z_]+)\/run\/?$/,  handler: runSyncJobNow },
   { method: "POST",  pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/wallet\/refresh\/?$/, handler: refreshWallet },
+  // Comp/test credit — no Stripe charge. Audit-logged.
+  { method: "POST",  pattern: /^\/admin-api\/customers\/([0-9a-f-]+)\/credit\/?$/,          handler: addCredit },
 ];
 
 // Health endpoint — un-auth'd for the launcher's status pings.
