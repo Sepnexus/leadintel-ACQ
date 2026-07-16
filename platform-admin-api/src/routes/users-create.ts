@@ -11,9 +11,18 @@
 // to provision the auth.users row (with a bcrypt password) on platform-db AND
 // both app DBs — one shared UUID across all three (post-C2 identity model), so
 // the apps' per-app login + resolveCaller() all resolve the same person.
+//
+// Optionally pass customer_id (+ role) to ALSO assign the new user to a customer.
+// That assignment is what actually grants product access: it writes
+// platform.customer_users for every product the customer has enabled, then
+// syncCustomerMemberships() mirrors it into ACQ (profiles + user_roles) and LI
+// (users + tenant_users). Without it a user can log in but sees nothing — which
+// is why a user created inside one app alone (e.g. Lead Intel) never shows up
+// in ACQ.
 
 import { sql, acqSql, liSql } from "../db.ts";
 import { AuthedAdmin, json } from "../auth.ts";
+import { syncCustomerMemberships } from "../lib/provisioning.ts";
 import bcrypt from "npm:bcryptjs@2.4.3";
 
 interface BridgeResult { ok: boolean; created?: boolean; error?: string; [k: string]: boolean | string | undefined }
@@ -36,11 +45,16 @@ async function upsertAuthUser(db: any, userId: string, email: string, hash: stri
 export async function createUser(req: Request, admin: AuthedAdmin): Promise<Response> {
   const body = await req.json().catch(() => ({})) as {
     email?: string; password?: string; full_name?: string; is_platform_admin?: boolean;
+    customer_id?: string; role?: string;
   };
   const email = (body.email ?? "").trim().toLowerCase();
   const password = (body.password ?? "").toString();
   const fullName = (body.full_name ?? "").trim() || null;
   const makeAdmin = !!body.is_platform_admin;
+  // Optional: assign to a customer in the same step. This is what grants
+  // product access (both apps), so a normal user is usable immediately.
+  const customerId = (body.customer_id ?? "").trim() || null;
+  const role = (body.role ?? "").trim() || "tenant_user";
 
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return json({ error: "bad_email", reason: "a valid email is required" }, 400);
@@ -50,6 +64,31 @@ export async function createUser(req: Request, admin: AuthedAdmin): Promise<Resp
   }
   if (password.length > 128) {
     return json({ error: "bad_password", reason: "password must be 128 characters or fewer" }, 400);
+  }
+
+  // Validate the customer + its enabled products BEFORE creating anything, so a
+  // bad customer_id can never leave an orphaned login behind.
+  let customer: { id: string; name: string } | null = null;
+  let enabledProducts: string[] = [];
+  if (customerId) {
+    const rows = await sql<{ id: string; name: string }[]>`
+      SELECT id, name FROM platform.customers WHERE id = ${customerId}::uuid LIMIT 1
+    `;
+    if (rows.length === 0) {
+      return json({ error: "customer_not_found", reason: "unknown customer_id" }, 404);
+    }
+    customer = rows[0];
+    const prods = await sql<{ product: string }[]>`
+      SELECT product FROM platform.customer_product_access
+      WHERE customer_id = ${customerId}::uuid AND enabled = true
+    `;
+    if (prods.length === 0) {
+      return json({
+        error: "no_products_enabled",
+        reason: "that customer has no products enabled — turn on ACQ Coach and/or Lead Intel for the customer first, then add users",
+      }, 400);
+    }
+    enabledProducts = prods.map((p) => p.product);
   }
 
   const existing = await sql<{ id: string }[]>`
@@ -81,10 +120,32 @@ export async function createUser(req: Request, admin: AuthedAdmin): Promise<Resp
     upsertAuthUser(liSql, userId, email, hash),
   ]);
 
+  // Assign to the customer — one membership row per enabled product, then mirror
+  // it into ACQ (profiles + user_roles) and LI (users + tenant_users). This is
+  // the step that makes BOTH apps visible to the user.
+  let assignment: Record<string, unknown> | null = null;
+  if (customerId && customer) {
+    for (const product of enabledProducts) {
+      await sql`
+        INSERT INTO platform.customer_users (customer_id, user_id, product, role)
+        VALUES (${customerId}::uuid, ${userId}::uuid, ${product}::platform.product, ${role})
+        ON CONFLICT (customer_id, user_id, product) DO UPDATE SET role = EXCLUDED.role
+      `;
+    }
+    const provisioning = await syncCustomerMemberships(customerId);
+    assignment = {
+      customer_id: customerId,
+      customer_name: customer.name,
+      role,
+      products: enabledProducts,
+      provisioning,
+    };
+  }
+
   await sql`
     INSERT INTO platform.audit_log (actor_user_id, target_user_id, action, metadata)
     VALUES (${admin.platformUserId}::uuid, ${userId}::uuid, 'user_created_by_admin',
-            ${sql.json({ email, is_platform_admin: makeAdmin, bridges: { platform: platformR, acq: acqR, leadintel: liR } })})
+            ${sql.json({ email, is_platform_admin: makeAdmin, assignment, bridges: { platform: platformR, acq: acqR, leadintel: liR } })})
   `;
 
   return json({
@@ -92,10 +153,13 @@ export async function createUser(req: Request, admin: AuthedAdmin): Promise<Resp
     user_id: userId,
     email,
     is_platform_admin: makeAdmin,
+    assignment,
     bridges: { platform: platformR, acq: acqR, leadintel: liR },
     note: makeAdmin
       ? "Super-admin created. They can log in at the launcher with this password and have full platform access."
-      : "User created. They can log in, but get product access only once added to a customer.",
+      : assignment
+      ? `User created and added to ${customer!.name} (${enabledProducts.join(" + ")}). They can log in now and will see every product enabled for that customer.`
+      : "User created. They can log in, but will see no products until you assign them to a customer.",
   });
 }
 

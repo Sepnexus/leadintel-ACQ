@@ -242,9 +242,18 @@ export const adminApi = {
       body: JSON.stringify({ password }),
     })),
   // Create a brand-new platform user (optionally a super-admin) with a password.
-  createUser: (p: { email: string; password: string; full_name?: string; is_platform_admin?: boolean }) =>
+  // customer_id assigns the user to a customer in the same step — that's what
+  // grants product access (every product the customer has enabled), so the user
+  // sees ACQ + Lead Intel immediately instead of logging in to nothing.
+  createUser: (p: {
+    email: string; password: string; full_name?: string; is_platform_admin?: boolean;
+    customer_id?: string; role?: string;
+  }) =>
     jsonOr<{
       ok: true; user_id: string; email: string; is_platform_admin: boolean;
+      assignment: null | {
+        customer_id: string; customer_name: string; role: string; products: string[];
+      };
       bridges: {
         platform:  { ok: boolean; created?: boolean; error?: string };
         acq:       { ok: boolean; created?: boolean; error?: string };

@@ -356,11 +356,24 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<{ email: string; is_platform_admin: boolean; note: string } | null>(null);
+  // A normal (non-admin) user needs a customer — that assignment is what grants
+  // product access. Without it they log in and see nothing, which is exactly the
+  // "Lead Intel shows but ACQ doesn't" trap.
+  const [customerId, setCustomerId] = useState("");
+  const [role, setRole] = useState("tenant_user");
+  const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
+
+  useEffect(() => {
+    adminApi.listCustomers().then(r => {
+      if (r.ok) setCustomers(r.data.customers.map(c => ({ id: c.id, name: c.name })));
+    });
+  }, []);
 
   const emailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
   const tooShort = pw.length > 0 && pw.length < 8;
   const mismatch = pw2.length > 0 && pw !== pw2;
-  const canSubmit = !busy && !done && emailOk && pw.length >= 8 && pw === pw2;
+  const needsCustomer = !superAdmin && !customerId;
+  const canSubmit = !busy && !done && emailOk && pw.length >= 8 && pw === pw2 && !needsCustomer;
 
   async function submit() {
     setErr(null); setBusy(true);
@@ -368,6 +381,8 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
       email: email.trim(), password: pw,
       full_name: fullName.trim() || undefined,
       is_platform_admin: superAdmin,
+      // Super-admins see every customer, so they don't need an assignment.
+      ...(superAdmin ? {} : { customer_id: customerId, role }),
     });
     setBusy(false);
     if (!r.ok) { setErr(r.error); return; }
@@ -447,6 +462,28 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
               <span style={{ color: COLORS.TEXT, fontWeight: 600 }}>Platform super-admin</span>
               <span style={{ color: COLORS.T3, fontSize: 12 }}>— full access to every customer + this admin panel</span>
             </label>
+
+            {!superAdmin && (
+              <>
+                <label style={labelStyle}>Assign to customer</label>
+                <select value={customerId} onChange={e => setCustomerId(e.target.value)}
+                  style={{ ...inputStyle(needsCustomer), cursor: "pointer" }}>
+                  <option value="">Select a customer…</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <div style={{ fontSize: 11, color: needsCustomer ? "#c0392b" : COLORS.T3, marginBottom: 8, lineHeight: 1.5 }}>
+                  Required — this is what grants access. They'll get every product
+                  that customer has enabled (ACQ Coach and/or Lead Intel).
+                </div>
+
+                <label style={labelStyle}>Role</label>
+                <select value={role} onChange={e => setRole(e.target.value)}
+                  style={{ ...inputStyle(false), cursor: "pointer" }}>
+                  <option value="tenant_user">Member — normal user</option>
+                  <option value="account_admin">Account admin — can manage this customer's team</option>
+                </select>
+              </>
+            )}
 
             {err && (
               <div style={{
