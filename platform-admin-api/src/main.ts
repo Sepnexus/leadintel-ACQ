@@ -10,7 +10,7 @@ import "./db.ts"; // boots the connection pool + fail-fast check
 import { listCustomers, getCustomer, setCustomerAccess, updateCustomer, createCustomer, syncMemberships } from "./routes/customers.ts";
 import { listUsers, getUser } from "./routes/users.ts";
 import { setUserPassword } from "./routes/users-password.ts";
-import { createUser, setPlatformAdmin } from "./routes/users-create.ts";
+import { createUser, setPlatformAdmin, deleteUser } from "./routes/users-create.ts";
 import { listAudit } from "./routes/audit.ts";
 import { setGhlCredentials, revealGhlToken, validateGhlCredentials } from "./routes/ghl-credentials.ts";
 import { listPlatformKeys } from "./routes/platform-settings.ts";
@@ -59,6 +59,8 @@ const routes: Route[] = [
   { method: "GET",   pattern: /^\/admin-api\/users\/([0-9a-f-]+)\/?$/,     handler: getUser },
   { method: "POST",  pattern: /^\/admin-api\/users\/([0-9a-f-]+)\/password\/?$/, handler: setUserPassword },
   { method: "PATCH", pattern: /^\/admin-api\/users\/([0-9a-f-]+)\/platform-admin\/?$/, handler: setPlatformAdmin },
+  // Remove a user from the platform + both apps. Blocks self-delete / last admin.
+  { method: "DELETE", pattern: /^\/admin-api\/users\/([0-9a-f-]+)\/?$/,               handler: deleteUser },
   { method: "GET",   pattern: /^\/admin-api\/audit\/?$/,                  handler: listAudit },
   { method: "GET",   pattern: /^\/admin-api\/platform-summary\/?$/,        handler: getPlatformSummary },
   { method: "GET",   pattern: /^\/admin-api\/platform-settings\/keys\/?$/, handler: listPlatformKeys },

@@ -276,6 +276,14 @@ export const adminApi = {
       headers: { ...authHeader(), "Content-Type": "application/json" },
       body: JSON.stringify({ amount_cents, reason }),
     })),
+  // Remove a user from the platform + both apps, login included. Irreversible.
+  // Refused for your own account or the last remaining platform admin.
+  deleteUser: (id: string) =>
+    jsonOr<{
+      ok: true; user_id: string; email: string;
+      cleanup: { platform?: string; acq?: string; leadintel?: string };
+      note: string;
+    }>(fetch(`${BASE}/users/${id}`, { method: "DELETE", headers: authHeader() })),
   // Grant/revoke the platform super-admin flag.
   setPlatformAdmin: (id: string, is_platform_admin: boolean) =>
     jsonOr<{ ok: true; user_id: string; is_platform_admin: boolean }>(fetch(`${BASE}/users/${id}/platform-admin`, {

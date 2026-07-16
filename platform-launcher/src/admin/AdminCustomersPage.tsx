@@ -7,6 +7,7 @@ import { Pill, Toggle, ErrorBanner } from "./AdminLayout";
 import { AddCustomerModal } from "./AddCustomerModal";
 import { GhlCredentialsCard } from "./GhlCredentialsCard";
 import { BillingCard } from "./BillingCard";
+import { TeamCard } from "./TeamCard";
 import { SetupChecklistCard } from "./SetupChecklistCard";
 import { useToast } from "./Toast";
 
@@ -149,6 +150,9 @@ function CustomerDetailView({ customerId, onBack }: { customerId: string; onBack
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Product | null>(null);
+  const [nameEdit, setNameEdit] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [nameBusy, setNameBusy] = useState(false);
   const toast = useToast();
 
   async function load() {
@@ -158,6 +162,22 @@ function CustomerDetailView({ customerId, onBack }: { customerId: string; onBack
   }
 
   useEffect(() => { load(); }, [customerId]);
+
+  // Rename only touches the platform-side display name — the apps key off
+  // customer_id, so nothing downstream needs re-syncing.
+  const nameOk = nameDraft.trim().length >= 2 && nameDraft.trim().length <= 120;
+  async function saveName() {
+    if (!nameOk || nameBusy) return;
+    const next = nameDraft.trim();
+    if (next === detail?.customer.name) { setNameEdit(false); return; }
+    setNameBusy(true);
+    const r = await adminApi.updateCustomer(customerId, { name: next });
+    setNameBusy(false);
+    if (!r.ok) { toast.error(`Rename failed: ${r.error}`); return; }
+    setNameEdit(false);
+    toast.success(`Renamed to ${next}`);
+    await load();
+  }
 
   async function toggle(product: Product, currentEnabled: boolean) {
     if (busy) return;
@@ -200,8 +220,50 @@ function CustomerDetailView({ customerId, onBack }: { customerId: string; onBack
       {/* Header */}
       <div style={{ background: COLORS.S1, border: `1px solid ${COLORS.B2}`, borderRadius: 10, padding: 24, marginBottom: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 24 }}>{c.name}</h2>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            {nameEdit ? (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  value={nameDraft} onChange={e => setNameDraft(e.target.value)} autoFocus
+                  onKeyDown={e => {
+                    if (e.key === "Enter") saveName();
+                    if (e.key === "Escape") setNameEdit(false);
+                  }}
+                  style={{
+                    fontSize: 20, fontWeight: 700, padding: "4px 10px", background: COLORS.BG,
+                    border: `1px solid ${nameOk ? COLORS.B3 : "#c0392b"}`, borderRadius: 6,
+                    color: COLORS.TEXT, fontFamily: FONT, minWidth: 240,
+                  }} />
+                <button
+                  onClick={saveName} disabled={!nameOk || nameBusy}
+                  style={{
+                    background: nameOk && !nameBusy ? COLORS.GREEN : COLORS.B2, border: "none",
+                    borderRadius: 6, padding: "7px 14px", color: nameOk && !nameBusy ? "#fff" : COLORS.T3,
+                    fontSize: 12, fontWeight: 600, fontFamily: FONT,
+                    cursor: nameOk && !nameBusy ? "pointer" : "not-allowed",
+                  }}
+                >{nameBusy ? "Saving…" : "Save"}</button>
+                <button
+                  onClick={() => setNameEdit(false)} disabled={nameBusy}
+                  style={{
+                    background: "transparent", border: `1px solid ${COLORS.B3}`, borderRadius: 6,
+                    padding: "7px 14px", color: COLORS.T2, fontSize: 12, cursor: "pointer", fontFamily: FONT,
+                  }}
+                >Cancel</button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <h2 style={{ margin: 0, fontSize: 24 }}>{c.name}</h2>
+                <button
+                  onClick={() => { setNameDraft(c.name); setNameEdit(true); }}
+                  title="Rename this customer"
+                  style={{
+                    background: "transparent", border: `1px solid ${COLORS.B3}`, borderRadius: 6,
+                    padding: "3px 9px", color: COLORS.T3, fontSize: 11, cursor: "pointer", fontFamily: FONT,
+                  }}
+                >✎ Rename</button>
+              </div>
+            )}
             <div style={{ marginTop: 8, color: COLORS.T2, fontSize: 13 }}>
               status: <strong>{c.status}</strong> · plan: <strong>{c.plan}</strong>
               {c.trial_active && c.trial_expires_at && <> · trial ends <strong>{new Date(c.trial_expires_at).toLocaleDateString()}</strong></>}
@@ -219,6 +281,9 @@ function CustomerDetailView({ customerId, onBack }: { customerId: string; onBack
 
       {/* Setup checklist — onboarding progress, deep-links into apps for module-specific config */}
       <SetupChecklistCard customerId={c.id} />
+
+      {/* Who can sign in for this customer */}
+      <TeamCard customerId={c.id} customerName={c.name} />
 
       {/* GHL credentials — editable */}
       <GhlCredentialsCard customer={c} onChanged={load} />

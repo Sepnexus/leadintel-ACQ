@@ -1,5 +1,6 @@
-// POST  /admin-api/users                     — create a new platform user (optionally a super-admin)
-// PATCH /admin-api/users/:id/platform-admin   — grant/revoke the is_platform_admin flag
+// POST   /admin-api/users                     — create a new platform user (optionally a super-admin)
+// PATCH  /admin-api/users/:id/platform-admin   — grant/revoke the is_platform_admin flag
+// DELETE /admin-api/users/:id                  — remove a user from the platform + both apps
 //
 // Platform-Admin-only: the whole /admin-api surface is gated on is_platform_admin
 // in main.ts, so only an existing super-admin can mint another one. This is what
@@ -27,7 +28,11 @@ import bcrypt from "npm:bcryptjs@2.4.3";
 
 interface BridgeResult { ok: boolean; created?: boolean; error?: string; [k: string]: boolean | string | undefined }
 
-async function upsertAuthUser(db: any, userId: string, email: string, hash: string): Promise<BridgeResult> {
+// Exported so the team-invite path (routes/me.ts) mints logins the same way —
+// one shared UUID with auth rows in all three DBs. It used to insert a bare
+// platform.users row, which left the invitee with memberships but no login
+// anywhere and no acq_user_id for ensureProvisioned() to hang the mirror off.
+export async function upsertAuthUser(db: any, userId: string, email: string, hash: string): Promise<BridgeResult> {
   if (!db) return { ok: false, error: "bridge_unavailable" };
   try {
     const rows = await db<{ result: string }[]>`
@@ -111,8 +116,9 @@ export async function createUser(req: Request, admin: AuthedAdmin): Promise<Resp
   const hash = await bcrypt.hash(password, 10);
   const platformR = await upsertAuthUser(sql, userId, email, hash);
   if (!platformR.ok) {
-    // Roll back so a retry is clean (no orphan platform.users row).
-    await sql`DELETE FROM platform.users WHERE id = ${userId}::uuid`;
+    // Roll back so a retry is clean (no orphan platform.users row). Via the
+    // SECURITY DEFINER function — platform_admin has no DELETE of its own.
+    await sql`SELECT platform.admin_delete_user(${userId}::uuid)`;
     return json({ error: "auth_create_failed", reason: platformR.error }, 500);
   }
   const [acqR, liR] = await Promise.all([
@@ -186,4 +192,86 @@ export async function setPlatformAdmin(req: Request, admin: AuthedAdmin, id: str
             ${sql.json({ email: rows[0].email, is_platform_admin: body.is_platform_admin })})
   `;
   return json({ ok: true, user_id: id, is_platform_admin: body.is_platform_admin });
+}
+
+// DELETE /admin-api/users/:id
+//
+// Removes the person everywhere: app-side access rows first (they FK to the
+// auth user), then each app's auth login, then the platform row. Each app is
+// best-effort and reported back — a wedged bridge shouldn't strand the user
+// half-deleted with no feedback.
+//
+// Guardrails: you can't delete yourself, and you can't delete the last platform
+// admin (that would lock everyone out of this panel).
+export async function deleteUser(_req: Request, admin: AuthedAdmin, id: string): Promise<Response> {
+  if (id === admin.platformUserId) {
+    return json({ error: "self_delete_blocked", reason: "you cannot delete your own account" }, 400);
+  }
+
+  const rows = await sql<{ id: string; email: string; is_platform_admin: boolean }[]>`
+    SELECT id, email, is_platform_admin FROM platform.users WHERE id = ${id}::uuid
+  `;
+  if (rows.length === 0) return json({ error: "not_found" }, 404);
+  const target = rows[0];
+
+  if (target.is_platform_admin) {
+    const c = await sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM platform.users WHERE is_platform_admin = true
+    `;
+    if ((c[0]?.n ?? 0) <= 1) {
+      return json({
+        error: "last_admin_blocked",
+        reason: "this is the only platform admin — make someone else an admin first",
+      }, 400);
+    }
+  }
+
+  const cleanup: Record<string, string> = {};
+
+  // ACQ: access rows -> profile -> auth login.
+  if (acqSql) {
+    try {
+      await acqSql`DELETE FROM public.user_roles       WHERE user_id = ${id}::uuid`;
+      await acqSql`DELETE FROM public.rep_assignments  WHERE user_id = ${id}::uuid`;
+      await acqSql`DELETE FROM public.profiles         WHERE id      = ${id}::uuid`;
+      await acqSql`DELETE FROM auth.users              WHERE id      = ${id}::uuid`;
+      cleanup.acq = "ok";
+    } catch (e) { cleanup.acq = `failed: ${(e as Error).message}`; }
+  } else cleanup.acq = "bridge unavailable";
+
+  // Lead Intel: membership -> app user -> auth login.
+  if (liSql) {
+    try {
+      await liSql`DELETE FROM public.tenant_users WHERE user_id = ${id}::uuid`;
+      await liSql`DELETE FROM public.users        WHERE id      = ${id}::uuid`;
+      await liSql`DELETE FROM auth.users          WHERE id      = ${id}::uuid`;
+      cleanup.leadintel = "ok";
+    } catch (e) { cleanup.leadintel = `failed: ${(e as Error).message}`; }
+  } else cleanup.leadintel = "bridge unavailable";
+
+  // Platform last. Goes through the SECURITY DEFINER function because we connect
+  // here as platform_admin, which has no DELETE on platform.users or auth.users
+  // (16-admin-delete-user.sql).
+  try {
+    await sql`SELECT platform.admin_delete_user(${id}::uuid)`;
+    cleanup.platform = "ok";
+  } catch (e) {
+    return json({ error: "delete_failed", reason: (e as Error).message, cleanup }, 500);
+  }
+
+  // Audit with the actor's id only — target_user_id would FK to the row we just
+  // deleted, so the email/id live in metadata instead.
+  await sql`
+    INSERT INTO platform.audit_log (actor_user_id, action, metadata)
+    VALUES (${admin.platformUserId}::uuid, 'user_deleted_by_admin',
+            ${sql.json({ user_id: id, email: target.email, was_platform_admin: target.is_platform_admin, cleanup })})
+  `;
+
+  return json({
+    ok: true,
+    user_id: id,
+    email: target.email,
+    cleanup,
+    note: `${target.email} removed from the platform, ACQ Coach and Lead Intel.`,
+  });
 }

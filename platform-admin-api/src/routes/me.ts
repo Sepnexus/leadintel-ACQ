@@ -7,6 +7,8 @@
 import { sql, acqSql, liSql } from "../db.ts";
 import { json, requireAuthedJwt, AuthedAdmin } from "../auth.ts";
 import { ensureProvisioned, syncCustomerMemberships } from "../lib/provisioning.ts";
+import { upsertAuthUser } from "./users-create.ts";
+import bcrypt from "npm:bcryptjs@2.4.3";
 
 // GET /admin-api/platform-summary — platform-wide totals for the super-admin
 // home (admin-gated in main.ts). One SQL pass over the shared ledger instead
@@ -144,12 +146,37 @@ export async function inviteToTeam(req: Request, cid: string): Promise<Response>
   `)[0];
 
   if (!platformUser) {
-    const inserted = await sql<{ id: string }[]>`
-      INSERT INTO platform.users (email, full_name)
-      VALUES (${email}, ${body?.full_name ?? null})
-      RETURNING id
+    // Brand-new person. Mint the login exactly like POST /admin-api/users does:
+    // one shared UUID, back-pointers set, and an auth.users row in platform + both
+    // app DBs. Inserting a bare platform.users row here (the old behaviour) left
+    // acq_user_id/leadintel_user_id NULL, so ensureProvisioned() below could not
+    // mirror them into ACQ/LI and they ended up with memberships but no way in.
+    // There's no outbound email in this deployment, so a password is required —
+    // the admin hands it over directly.
+    const password = (body?.password ?? "").toString();
+    if (password.length < 8) {
+      return json({
+        error: "password_required",
+        reason: `${email} does not have an account yet — set a password (8+ characters) to create one`,
+      }, 400);
+    }
+    const idRow = await sql<{ id: string }[]>`SELECT gen_random_uuid() AS id`;
+    const newId = idRow[0].id;
+    await sql`
+      INSERT INTO platform.users (id, email, full_name, acq_user_id, leadintel_user_id)
+      VALUES (${newId}::uuid, ${email}, ${body?.full_name ?? null}, ${newId}::uuid, ${newId}::uuid)
     `;
-    platformUser = { id: inserted[0].id, email, full_name: body?.full_name ?? null };
+    const hash = await bcrypt.hash(password, 10);
+    const authR = await upsertAuthUser(sql, newId, email, hash);
+    if (!authR.ok) {
+      await sql`SELECT platform.admin_delete_user(${newId}::uuid)`; // don't strand a half-made user
+      return json({ error: "auth_create_failed", reason: authR.error }, 500);
+    }
+    await Promise.all([
+      upsertAuthUser(acqSql, newId, email, hash),
+      upsertAuthUser(liSql, newId, email, hash),
+    ]);
+    platformUser = { id: newId, email, full_name: body?.full_name ?? null };
   }
 
   // Add to customer_users (idempotent).
@@ -180,7 +207,20 @@ export async function inviteToTeam(req: Request, cid: string): Promise<Response>
     )
   `;
 
-  return json({ ok: true, user: platformUser, provisioning_count: provisioning.results.length });
+  // Report mirroring failures for THIS user instead of a bare count. The count
+  // covers every member of the customer, so it stayed reassuringly non-zero even
+  // when the person we just added was the one that failed to provision.
+  const mine = provisioning.results.filter(x => x.user_id === platformUser.id);
+  const failed = mine.filter(x => !x.result.ok);
+  return json({
+    ok: true,
+    user: platformUser,
+    provisioned: mine.map(x => ({ product: x.product, ok: x.result.ok, error: x.result.ok ? undefined : (x.result as { error?: string }).error })),
+    warning: failed.length > 0
+      ? `added to the customer, but could not be set up in ${failed.map(f => f.product).join(" + ")} — they may not see data there`
+      : undefined,
+    provisioning_count: provisioning.results.length,
+  });
 }
 
 // DELETE /admin-api/me/customer/:cid/team/:uid — remove user from customer.

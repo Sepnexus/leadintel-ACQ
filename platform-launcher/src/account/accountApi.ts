@@ -82,12 +82,15 @@ export const accountApi = {
       fetch(`${BASE}/me/customers`, { headers: authHeader() })),
   listTeam: (cid: string) =>
     jsonOr<{ team: TeamMember[] }>(fetch(`${BASE}/me/customer/${cid}/team`, { headers: authHeader() })),
-  invite: (cid: string, email: string, role: string, full_name?: string) =>
-    jsonOr<{ ok: true }>(fetch(`${BASE}/me/customer/${cid}/team`, {
-      method: "POST",
-      headers: { ...authHeader(), "Content-Type": "application/json" },
-      body: JSON.stringify({ email, role, full_name }),
-    })),
+  // password is only needed when the email has no account yet — the API says so
+  // explicitly (error "password_required") rather than us guessing client-side.
+  invite: (cid: string, email: string, role: string, full_name?: string, password?: string) =>
+    jsonOr<{ ok: true; warning?: string; provisioned?: Array<{ product: string; ok: boolean; error?: string }> }>(
+      fetch(`${BASE}/me/customer/${cid}/team`, {
+        method: "POST",
+        headers: { ...authHeader(), "Content-Type": "application/json" },
+        body: JSON.stringify({ email, role, full_name, password }),
+      })),
   remove: (cid: string, uid: string) =>
     jsonOr<{ ok: true; removed_count: number }>(fetch(`${BASE}/me/customer/${cid}/team/${uid}`, {
       method: "DELETE", headers: authHeader(),

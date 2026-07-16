@@ -189,6 +189,10 @@ function UserDetailView({ userId, onBack }: { userId: string; onBack: () => void
   const [pwOpen, setPwOpen] = useState(false);
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminErr, setAdminErr] = useState<string | null>(null);
+  const [delOpen, setDelOpen] = useState(false);
+  const [delConfirm, setDelConfirm] = useState("");
+  const [delBusy, setDelBusy] = useState(false);
+  const [delErr, setDelErr] = useState<string | null>(null);
 
   async function load() {
     const r = await adminApi.getUser(userId);
@@ -210,6 +214,7 @@ function UserDetailView({ userId, onBack }: { userId: string; onBack: () => void
     if (c.customer_li_enabled)  customerProducts.add("lead_intel");
   }
   const isAdmin = detail.user.is_platform_admin;
+  const delOk = delConfirm.trim().toLowerCase() === detail.user.email.toLowerCase();
   const hasAcq = isAdmin || customerProducts.has("acq_coach");
   const hasLi  = isAdmin || customerProducts.has("lead_intel");
 
@@ -338,6 +343,81 @@ function UserDetailView({ userId, onBack }: { userId: string; onBack: () => void
           ))
         }
       </Section>
+
+      {/* Danger zone — irreversible, and it spans three databases, so it's gated
+          behind typing the email rather than a single click. */}
+      <div style={{
+        background: COLORS.S1, border: "1px solid rgba(192,57,43,0.4)",
+        borderRadius: 10, marginTop: 18, overflow: "hidden",
+      }}>
+        <div style={{
+          padding: "12px 20px", borderBottom: "1px solid rgba(192,57,43,0.25)",
+          fontSize: 12, color: "#ff7a7a", fontWeight: 700,
+          letterSpacing: "0.04em", textTransform: "uppercase",
+        }}>Danger Zone</div>
+        <div style={{ padding: "16px 20px" }}>
+          {!delOpen ? (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12, color: COLORS.T2, lineHeight: 1.6, flex: 1, minWidth: 240 }}>
+                Deleting removes this user's login and memberships from the platform,
+                ACQ Coach and Lead Intel. Their historical activity and any calls they
+                are attached to stay put.
+              </div>
+              <button
+                onClick={() => { setDelOpen(true); setDelErr(null); setDelConfirm(""); }}
+                style={{
+                  background: "rgba(192,57,43,0.10)", border: "1px solid #c0392b",
+                  borderRadius: 6, padding: "7px 14px", color: "#ff7a7a",
+                  fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT, whiteSpace: "nowrap",
+                }}
+              >Delete user</button>
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize: 12, color: COLORS.T2, marginBottom: 10, lineHeight: 1.6 }}>
+                This cannot be undone. Type <strong style={{ color: COLORS.TEXT }}>{detail.user.email}</strong> to confirm.
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  value={delConfirm} onChange={e => setDelConfirm(e.target.value)}
+                  placeholder={detail.user.email} autoFocus
+                  style={{
+                    flex: 1, minWidth: 240, padding: "7px 10px", background: COLORS.BG,
+                    border: `1px solid ${delConfirm && !delOk ? "#c0392b" : COLORS.B3}`,
+                    borderRadius: 6, color: COLORS.TEXT, fontSize: 12, fontFamily: FONT,
+                  }} />
+                <button
+                  onClick={async () => {
+                    if (!delOk) return;
+                    setDelErr(null); setDelBusy(true);
+                    const r = await adminApi.deleteUser(userId);
+                    setDelBusy(false);
+                    if (r.ok) onBack(); else setDelErr(r.error);
+                  }}
+                  disabled={!delOk || delBusy}
+                  style={{
+                    background: delOk && !delBusy ? "#c0392b" : COLORS.B2, border: "none",
+                    borderRadius: 6, padding: "7px 14px",
+                    color: delOk && !delBusy ? "#fff" : COLORS.T3,
+                    fontSize: 12, fontWeight: 600, fontFamily: FONT,
+                    cursor: delOk && !delBusy ? "pointer" : "not-allowed", whiteSpace: "nowrap",
+                  }}
+                >{delBusy ? "Deleting…" : "Delete permanently"}</button>
+                <button
+                  onClick={() => { setDelOpen(false); setDelConfirm(""); setDelErr(null); }}
+                  disabled={delBusy}
+                  style={{
+                    background: "transparent", border: `1px solid ${COLORS.B3}`,
+                    borderRadius: 6, padding: "7px 14px", color: COLORS.T2,
+                    fontSize: 12, cursor: "pointer", fontFamily: FONT,
+                  }}
+                >Cancel</button>
+              </div>
+              {delErr && <div style={{ marginTop: 10, fontSize: 12, color: "#ff7a7a" }}>{delErr}</div>}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
