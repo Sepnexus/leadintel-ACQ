@@ -163,13 +163,24 @@ export async function setCustomerAccess(req: Request, admin: AuthedAdmin, id: st
   //   1. Ensure the customer EXISTS in the target app (ghl_accounts/tenants)
   //   2. Push existing customer members into that app's tables
   // No-op for revoke.
-  let appRow: unknown = null;
+  let appRow: { ok: boolean; error?: string } | null = null;
   let provisioning: unknown = null;
+  let warning: string | undefined;
   if (body.enabled) {
     try {
       appRow = await ensureAppCustomerRow(id, body.product);
     } catch (e) {
+      appRow = { ok: false, error: (e as Error).message };
       console.error("[setCustomerAccess] ensureAppCustomerRow failed:", (e as Error).message);
+    }
+    // If the app row could not be made or found, the product is enabled on paper
+    // only: ensureProvisioned() will skip every user of this customer as though
+    // they were an ACQ-only/LI-only account, and nothing downstream will error.
+    // Say so here instead of returning a bare ok:true, which is how a customer
+    // ended up "GRANTED" in the panel while the app told its users
+    // "No tenant assigned".
+    if (appRow && !appRow.ok) {
+      warning = `${body.product === "acq_coach" ? "ACQ Coach" : "Lead Intel"} is enabled but the customer could not be linked to an app account (${appRow.error}). Users will not see data there until this is resolved.`;
     }
     try {
       provisioning = await syncCustomerMemberships(id);
@@ -178,7 +189,7 @@ export async function setCustomerAccess(req: Request, admin: AuthedAdmin, id: st
     }
   }
 
-  return json({ ok: true, app_row: appRow, provisioning });
+  return json({ ok: true, app_row: appRow, provisioning, warning });
 }
 
 // POST /admin-api/customers/:id/sync — manually re-run provisioning for all

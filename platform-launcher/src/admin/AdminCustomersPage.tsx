@@ -192,6 +192,14 @@ function CustomerDetailView({ customerId, onBack }: { customerId: string; onBack
     const productName = product === "acq_coach" ? "ACQ Coach" : "Lead Intel";
     const action = !currentEnabled ? "enabled" : "disabled";
     const name = detail?.customer.name ?? "customer";
+    // Enabling can "succeed" while leaving the customer unlinked to an app
+    // account, which means users get access on paper and see nothing. Show that
+    // rather than a green toast.
+    if (r.data.warning) {
+      toast.error(r.data.warning);
+      await load();
+      return;
+    }
     toast.success(`${productName} ${action} for ${name}`, {
       undo: async () => {
         await adminApi.setCustomerAccess(customerId, product, currentEnabled);

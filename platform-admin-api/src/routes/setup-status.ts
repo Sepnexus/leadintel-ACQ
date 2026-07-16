@@ -64,6 +64,24 @@ export async function getSetupStatus(req: Request, _admin: AuthedAdmin, id: stri
       : "Turn on ACQ Coach and/or Lead Intel for this customer — users and setup depend on it.",
   });
 
+  // Step 0b — an enabled product must actually be linked to an app account.
+  // Without the link, ensureProvisioned() skips every user of this customer and
+  // reports ok:true ("this is fine for ACQ-only customers"), so the panel shows
+  // the product GRANTED while the app itself tells users "No tenant assigned".
+  // Only surfaced when something is wrong — a healthy customer sees no extra
+  // step here.
+  const unlinked: string[] = [];
+  if (hasAcq && !cust.acq_account_id)      unlinked.push("ACQ Coach");
+  if (hasLi  && !cust.leadintel_tenant_id) unlinked.push("Lead Intel");
+  if (unlinked.length > 0) {
+    steps.push({
+      id: "app_link",
+      label: `${unlinked.join(" + ")} enabled but not linked to an app account`,
+      done: false,
+      detail: `Users will get access on paper but see no data. Usually the app already has an account for this GHL location and the link was never written — toggling the product off and on re-attempts it, and now adopts an existing account instead of trying to create a duplicate.`,
+    });
+  }
+
   // Step 1 — GHL token set
   const tokenSet = cust.ghl_pit_token_encrypted != null;
   steps.push({

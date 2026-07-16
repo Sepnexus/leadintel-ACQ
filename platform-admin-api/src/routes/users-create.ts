@@ -130,6 +130,7 @@ export async function createUser(req: Request, admin: AuthedAdmin): Promise<Resp
   // it into ACQ (profiles + user_roles) and LI (users + tenant_users). This is
   // the step that makes BOTH apps visible to the user.
   let assignment: Record<string, unknown> | null = null;
+  let warning: string | undefined;
   if (customerId && customer) {
     for (const product of enabledProducts) {
       await sql`
@@ -139,6 +140,17 @@ export async function createUser(req: Request, admin: AuthedAdmin): Promise<Resp
       `;
     }
     const provisioning = await syncCustomerMemberships(customerId);
+    // A "skipped" result is reported as ok:true, because an unlinked product is
+    // indistinguishable from a customer that legitimately doesn't use it. For a
+    // user we just assigned to that very product, though, a skip means they will
+    // see nothing — so call it out rather than letting it read as success.
+    const mine = provisioning.results.filter(x => x.user_id === userId);
+    const skipped = mine.filter(x => (x.result as { skipped?: string }).skipped);
+    const failed  = mine.filter(x => !x.result.ok);
+    if (skipped.length > 0 || failed.length > 0) {
+      const bad = [...new Set([...skipped, ...failed].map(x => x.product === "acq_coach" ? "ACQ Coach" : "Lead Intel"))];
+      warning = `${email} was created and assigned, but could not be set up in ${bad.join(" + ")} — the customer is not linked to an app account there, so they will see no data. Check the customer's setup checklist.`;
+    }
     assignment = {
       customer_id: customerId,
       customer_name: customer.name,
@@ -160,6 +172,7 @@ export async function createUser(req: Request, admin: AuthedAdmin): Promise<Resp
     email,
     is_platform_admin: makeAdmin,
     assignment,
+    warning,
     bridges: { platform: platformR, acq: acqR, leadintel: liR },
     note: makeAdmin
       ? "Super-admin created. They can log in at the launcher with this password and have full platform access."

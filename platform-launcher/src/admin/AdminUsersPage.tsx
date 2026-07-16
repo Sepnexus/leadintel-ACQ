@@ -435,7 +435,7 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState<{ email: string; is_platform_admin: boolean; note: string } | null>(null);
+  const [done, setDone] = useState<{ email: string; is_platform_admin: boolean; note: string; warning?: string } | null>(null);
   // A normal (non-admin) user needs a customer — that assignment is what grants
   // product access. Without it they log in and see nothing, which is exactly the
   // "Lead Intel shows but ACQ doesn't" trap.
@@ -466,7 +466,7 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
     });
     setBusy(false);
     if (!r.ok) { setErr(r.error); return; }
-    setDone({ email: r.data.email, is_platform_admin: r.data.is_platform_admin, note: r.data.note });
+    setDone({ email: r.data.email, is_platform_admin: r.data.is_platform_admin, note: r.data.note, warning: r.data.warning });
   }
 
   const inputStyle = (bad: boolean) => ({
@@ -501,6 +501,15 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
               </div>
               <div style={{ color: COLORS.T3, fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>{done.note}</div>
             </div>
+            {/* The user was made, but a product they were assigned to isn't
+                linked to an app account — they'd see an empty app. */}
+            {done.warning && (
+              <div style={{
+                marginTop: 10, padding: "12px 14px", borderRadius: 8,
+                background: "rgba(192,57,43,0.10)", border: "1px solid rgba(192,57,43,0.45)",
+                color: "#ff9a9a", fontSize: 12, lineHeight: 1.5,
+              }}>⚠ {done.warning}</div>
+            )}
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
               <button onClick={onCreated} style={{
                 background: COLORS.GREEN, border: "none", borderRadius: 6,

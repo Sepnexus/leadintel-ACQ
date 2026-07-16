@@ -170,8 +170,10 @@ export const adminApi = {
   me:               () => jsonOr<MeResponse>(fetch(`${BASE}/me`,        { headers: authHeader() })),
   listCustomers:    (q = "") => jsonOr<{ customers: CustomerRow[]; count: number }>(fetch(`${BASE}/customers?q=${encodeURIComponent(q)}`, { headers: authHeader() })),
   getCustomer:      (id: string) => jsonOr<CustomerDetail>(fetch(`${BASE}/customers/${id}`, { headers: authHeader() })),
+  // warning is set when the product is enabled but the customer could not be
+  // linked to an app account — access on paper, no data in the app.
   setCustomerAccess:(id: string, product: Product, enabled: boolean, opts: { valid_until?: string | null; notes?: string | null } = {}) =>
-    jsonOr<{ ok: true }>(fetch(`${BASE}/customers/${id}/access`, {
+    jsonOr<{ ok: true; warning?: string }>(fetch(`${BASE}/customers/${id}/access`, {
       method: "POST",
       headers: { ...authHeader(), "Content-Type": "application/json" },
       body: JSON.stringify({ product, enabled, ...opts }),
@@ -254,6 +256,7 @@ export const adminApi = {
       assignment: null | {
         customer_id: string; customer_name: string; role: string; products: string[];
       };
+      warning?: string;
       bridges: {
         platform:  { ok: boolean; created?: boolean; error?: string };
         acq:       { ok: boolean; created?: boolean; error?: string };
