@@ -265,6 +265,17 @@ export const adminApi = {
       headers: { ...authHeader(), "Content-Type": "application/json" },
       body: JSON.stringify(p),
     })),
+  // Comp/test credit — no Stripe charge. Goes through the same unified ledger
+  // as a real top-up, and is audit-logged with the actor + reason.
+  addCredit: (id: string, amount_cents: number, reason?: string) =>
+    jsonOr<{
+      ok: true; customer_id: string; customer_name: string;
+      amount_cents: number; balance_cents: number; reason: string; note: string;
+    }>(fetch(`${BASE}/customers/${id}/credit`, {
+      method: "POST",
+      headers: { ...authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ amount_cents, reason }),
+    })),
   // Grant/revoke the platform super-admin flag.
   setPlatformAdmin: (id: string, is_platform_admin: boolean) =>
     jsonOr<{ ok: true; user_id: string; is_platform_admin: boolean }>(fetch(`${BASE}/users/${id}/platform-admin`, {

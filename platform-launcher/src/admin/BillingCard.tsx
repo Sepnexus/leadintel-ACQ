@@ -24,6 +24,11 @@ export function BillingCard({ detail, onChanged }: {
   onChanged: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  // Comp/test credit — deliberately behind a small form so it can't be fired by
+  // a stray click, and always carries a reason (it's audit-logged).
+  const [creditOpen, setCreditOpen] = useState(false);
+  const [creditAmt, setCreditAmt] = useState("");
+  const [creditReason, setCreditReason] = useState("");
   const toast = useToast();
 
   async function refresh() {
@@ -32,6 +37,20 @@ export function BillingCard({ detail, onChanged }: {
     setBusy(false);
     if (!r.ok) { toast.error(`Refresh failed: ${r.error}`); return; }
     toast.success(`Balance refreshed: ${money(r.data.balance_cents)} (ACQ ${money(r.data.components.acq)} + LI ${money(r.data.components.leadintel)})`);
+    onChanged();
+  }
+
+  const creditCents = Math.round(parseFloat(creditAmt || "0") * 100);
+  const creditOk = Number.isInteger(creditCents) && creditCents > 0 && creditCents <= 100_000;
+
+  async function addCredit() {
+    if (!creditOk) return;
+    setBusy(true);
+    const r = await adminApi.addCredit(detail.customer.id, creditCents, creditReason.trim() || undefined);
+    setBusy(false);
+    if (!r.ok) { toast.error(`Credit failed: ${r.error}`); return; }
+    toast.success(r.data.note);
+    setCreditOpen(false); setCreditAmt(""); setCreditReason("");
     onChanged();
   }
 
@@ -48,16 +67,64 @@ export function BillingCard({ detail, onChanged }: {
         display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
         <div style={{ fontSize: 14, fontWeight: 600 }}>Billing & Wallet</div>
-        <button
-          onClick={refresh} disabled={busy}
-          style={{
-            background: "transparent", border: `1px solid ${COLORS.B3}`,
-            color: COLORS.T2, borderRadius: 6, padding: "5px 12px",
-            fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT,
-            opacity: busy ? 0.5 : 1,
-          }}
-        >{busy ? "Refreshing…" : "↻ Refresh balance"}</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={() => setCreditOpen(v => !v)} disabled={busy}
+            style={{
+              background: "transparent", border: `1px solid ${COLORS.GREEN}`,
+              color: COLORS.GREEN, borderRadius: 6, padding: "5px 12px",
+              fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT,
+              opacity: busy ? 0.5 : 1,
+            }}
+          >{creditOpen ? "Cancel" : "+ Add credit"}</button>
+          <button
+            onClick={refresh} disabled={busy}
+            style={{
+              background: "transparent", border: `1px solid ${COLORS.B3}`,
+              color: COLORS.T2, borderRadius: 6, padding: "5px 12px",
+              fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FONT,
+              opacity: busy ? 0.5 : 1,
+            }}
+          >{busy ? "Refreshing…" : "↻ Refresh balance"}</button>
+        </div>
       </div>
+
+      {/* Comp/test credit — no Stripe charge, audit-logged with the reason. */}
+      {creditOpen && (
+        <div style={{
+          padding: "14px 20px", borderBottom: `1px solid ${COLORS.B2}`,
+          background: "rgba(78,125,61,0.06)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
+        }}>
+          <span style={{ fontSize: 11, color: COLORS.T3 }}>$</span>
+          <input
+            value={creditAmt} onChange={e => setCreditAmt(e.target.value)}
+            placeholder="25.00" inputMode="decimal"
+            style={{
+              width: 90, padding: "6px 8px", background: COLORS.BG,
+              border: `1px solid ${creditAmt && !creditOk ? "#c0392b" : COLORS.B3}`,
+              borderRadius: 6, color: COLORS.TEXT, fontSize: 12, fontFamily: FONT,
+            }} />
+          <input
+            value={creditReason} onChange={e => setCreditReason(e.target.value)}
+            placeholder="Reason (e.g. onboarding test credit)"
+            style={{
+              flex: 1, minWidth: 200, padding: "6px 8px", background: COLORS.BG,
+              border: `1px solid ${COLORS.B3}`, borderRadius: 6,
+              color: COLORS.TEXT, fontSize: 12, fontFamily: FONT,
+            }} />
+          <button
+            onClick={addCredit} disabled={!creditOk || busy}
+            style={{
+              background: creditOk && !busy ? COLORS.GREEN : COLORS.B2, border: "none", borderRadius: 6,
+              padding: "6px 14px", color: creditOk && !busy ? "#fff" : COLORS.T3,
+              fontSize: 12, fontWeight: 600, cursor: creditOk && !busy ? "pointer" : "not-allowed", fontFamily: FONT,
+            }}
+          >{busy ? "Adding…" : "Add credit"}</button>
+          <div style={{ width: "100%", fontSize: 11, color: COLORS.T3 }}>
+            No card is charged. Goes through the same ledger as a real top-up and is recorded in the audit log. Max $1,000.
+          </div>
+        </div>
+      )}
 
       {/* Balance & usage */}
       <div style={{ padding: "20px 20px 16px", borderBottom: `1px solid ${COLORS.B2}` }}>
