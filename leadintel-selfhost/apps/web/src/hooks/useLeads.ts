@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { Lead } from "@/data/leads";
 import { displayName, type GhlUser } from "@/hooks/useGhlUsers";
 import { useTenantFilter } from "@/hooks/useTenantFilter";
+import { useSyncHistory } from "@/hooks/useSyncHistory";
 
 type OppRow = {
   ghl_contact_id: string;
@@ -69,6 +70,33 @@ export function useLeads(userMap?: Map<string, GhlUser>) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { tenantFilter, ready } = useTenantFilter();
+
+  // This hook used to fetch exactly once. Open the app during a tenant's first
+  // GHL sync — as every new customer does — and it read a still-empty
+  // ghl_contacts, showed "No leads in this filter", and never looked again,
+  // while the "Synced Xm ago" and "AI ready" badges polled on their own and
+  // cheerfully reported success. The app looked broken until a manual reload.
+  //
+  // useSyncHistory already polls every 5s while any sweep is running, so use it
+  // as the trigger: refetch when a sync finishes, and — only while we still have
+  // nothing to show — poll during a long first sync so leads appear as they land.
+  const { rows: syncRows } = useSyncHistory(tenantFilter, 10);
+  const syncing = syncRows.some((r) => r.status === "running");
+  const [reloadKey, setReloadKey] = useState(0);
+  const wasSyncing = useRef(false);
+
+  useEffect(() => {
+    if (wasSyncing.current && !syncing) setReloadKey((k) => k + 1);
+    wasSyncing.current = syncing;
+  }, [syncing]);
+
+  useEffect(() => {
+    // Refetching all six queries is not cheap, so only do this while a sync is
+    // running AND the screen is empty — i.e. the first-sync case this fixes.
+    if (!syncing || leads.length > 0) return;
+    const t = setInterval(() => setReloadKey((k) => k + 1), 30_000);
+    return () => clearInterval(t);
+  }, [syncing, leads.length]);
 
   useEffect(() => {
     if (!ready) return;
@@ -253,7 +281,7 @@ export function useLeads(userMap?: Map<string, GhlUser>) {
       }
     })();
     return () => { cancelled = true; };
-  }, [userMap, tenantFilter, ready]);
+  }, [userMap, tenantFilter, ready, reloadKey]);
 
   return { leads, loading, error };
 }

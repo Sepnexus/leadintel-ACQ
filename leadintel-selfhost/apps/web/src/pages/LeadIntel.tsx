@@ -240,13 +240,15 @@ export default function LeadIntelPage() {
   }, [aiTesting]);
   const { leads: remoteLeads, loading: leadsLoading } = useLeads(ghlUserMap);
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
-    if (remoteLeads.length > 0 && !hydrated) {
-      setLeads(remoteLeads);
-      setHydrated(true);
-    }
-  }, [remoteLeads, hydrated]);
+    if (remoteLeads.length === 0) return;
+    // Adopt fresh data on first load, and again any time we're showing nothing —
+    // which is what happens when the page is opened during a tenant's first sync
+    // and useLeads later refetches. Deliberately never replaces a list that
+    // already has rows: `leads` carries local edits (stage moves, assignment,
+    // touch counts) that a refetch would otherwise wipe mid-session.
+    setLeads((prev) => (prev.length === 0 ? remoteLeads : prev));
+  }, [remoteLeads]);
   const [callLog, setCallLog] = useState<CallLogEntry[]>(() => { try { const s = localStorage.getItem("leadIntel_callLog"); if (s) return JSON.parse(s); } catch {} return []; });
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("priority");
