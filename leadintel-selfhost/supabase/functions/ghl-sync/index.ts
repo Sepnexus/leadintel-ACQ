@@ -27,16 +27,32 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { persistSession: false },
 });
 
-// Per-invocation tenant context. Set in the handler before any sync function runs.
-let CURRENT_TENANT_ID = "";
-let CURRENT_PIT = "";
-let CURRENT_LOCATION_ID = "";
+// Per-request tenant context, passed explicitly to every function that touches
+// tenant data.
+//
+// These were module-level `let`s ("set in the handler before any sync runs").
+// That is not safe here: a Deno isolate is reused across concurrent invocations,
+// so they were shared state, not per-invocation state. Two tenants syncing at
+// the same time — which the all-tenants sweep causes by design — would race:
+// tenant A set the globals, awaited a GHL call, tenant B overwrote them, and
+// A's remaining rows were written under B's tenant_id, sometimes fetched with
+// B's token. That put thousands of contacts in the wrong customer's account and
+// made one client's leads visible to another. The per-tenant sync_locks do not
+// help: the collision is BETWEEN tenants, not within one.
+//
+// Passing the context explicitly makes the race structurally impossible — there
+// is no shared mutable state left to clobber.
+interface TenantCtx {
+  tenantId: string;
+  pit: string;
+  locationId: string;
+}
 
 // ---------- Custom field name → ID resolution ----------
 // Field IDs differ per GHL location, so we resolve them by name at the
 // start of each contact sync run. Names are matched case-insensitively
 // after trimming whitespace. Keep the keys here; values are filled at
-// runtime by resolveCustomFieldIds().
+// runtime by resolveCustomFieldIds(tc).
 //
 // DEPRECATED: the previous hardcoded ID map (keyed to a single account)
 // was removed on 2026-05-01 because IDs varied per tenant and silently
@@ -71,13 +87,13 @@ function normalizeFieldName(s: unknown): string {
   return typeof s === "string" ? s.trim().toLowerCase() : "";
 }
 
-async function resolveCustomFieldIds(): Promise<{ cf: CFMap; resolved: number; missing: string[] }> {
+async function resolveCustomFieldIds(tc: TenantCtx): Promise<{ cf: CFMap; resolved: number; missing: string[] }> {
   const cf: CFMap = {};
   for (const k of Object.keys(CF_FIELD_NAMES)) cf[k] = null;
 
   let fields: any[] = [];
   try {
-    const data = await ghlFetch(`/locations/${CURRENT_LOCATION_ID}/customFields`);
+    const data = await ghlFetch(tc, `/locations/${tc.locationId}/customFields`);
     fields = Array.isArray(data?.customFields) ? data.customFields : [];
   } catch (e) {
     console.warn(`resolveCustomFieldIds: GHL fetch failed: ${(e as Error).message}`);
@@ -120,7 +136,7 @@ function runInBackground(promise: Promise<unknown>) {
   else promise.catch((e) => console.warn("background task failed", e));
 }
 
-async function ghlFetch(path: string, params: Record<string, string | number | undefined> = {}) {
+async function ghlFetch(tc: TenantCtx, path: string, params: Record<string, string | number | undefined> = {}) {
   const url = new URL(GHL_BASE + path);
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
@@ -129,7 +145,7 @@ async function ghlFetch(path: string, params: Record<string, string | number | u
     const res = await fetch(url.toString(), {
       signal: AbortSignal.timeout(25_000),
       headers: {
-        Authorization: `Bearer ${CURRENT_PIT}`,
+        Authorization: `Bearer ${tc.pit}`,
         Version: GHL_VERSION,
         Accept: "application/json",
       },
@@ -221,21 +237,21 @@ function maybeDateToIso(v: any): string | null {
 }
 
 // ---------- Sync state ----------
-async function getSyncState(resource: string) {
+async function getSyncState(tc: TenantCtx, resource: string) {
   const { data, error } = await admin
     .from("sync_state")
     .select("*")
-    .eq("tenant_id", CURRENT_TENANT_ID)
+    .eq("tenant_id", tc.tenantId)
     .eq("resource", resource)
     .maybeSingle();
   if (error) throw error;
   return data;
 }
 
-async function recordSuccess(resource: string, mode: string) {
+async function recordSuccess(tc: TenantCtx, resource: string, mode: string) {
   const now = new Date().toISOString();
   const row: Record<string, any> = {
-    tenant_id: CURRENT_TENANT_ID,
+    tenant_id: tc.tenantId,
     resource,
     consecutive_failures: 0,
     last_error: null,
@@ -247,19 +263,19 @@ async function recordSuccess(resource: string, mode: string) {
   await admin.from("sync_state").upsert(row, { onConflict: "tenant_id,resource" });
 }
 
-async function recordProgress(resource: string, cursor: string | null) {
+async function recordProgress(tc: TenantCtx, resource: string, cursor: string | null) {
   await admin.from("sync_state").upsert(
-    { tenant_id: CURRENT_TENANT_ID, resource, last_delta_cursor: cursor, last_error: null, last_error_at: null },
+    { tenant_id: tc.tenantId, resource, last_delta_cursor: cursor, last_error: null, last_error_at: null },
     { onConflict: "tenant_id,resource" },
   );
 }
 
-async function recordFailure(resource: string, err: string) {
-  const state = await getSyncState(resource);
+async function recordFailure(tc: TenantCtx, resource: string, err: string) {
+  const state = await getSyncState(tc, resource);
   const failures = (state?.consecutive_failures ?? 0) + 1;
   await admin.from("sync_state").upsert(
     {
-      tenant_id: CURRENT_TENANT_ID,
+      tenant_id: tc.tenantId,
       resource,
       consecutive_failures: failures,
       last_error: err.slice(0, 2000),
@@ -275,9 +291,9 @@ async function recordFailure(resource: string, err: string) {
 // chained/resume children pass the same sweep_id and re-claim (extend) it. The
 // lock carries a TTL so an edge crash can never deadlock a tenant.
 const SWEEP_TTL_SEC = 300;
-async function claimSweepLock(sweepId: string): Promise<boolean> {
+async function claimSweepLock(tc: TenantCtx, sweepId: string): Promise<boolean> {
   const { data, error } = await admin.rpc("try_claim_sync_lock", {
-    p_tenant: CURRENT_TENANT_ID,
+    p_tenant: tc.tenantId,
     p_sweep: sweepId,
     p_ttl_seconds: SWEEP_TTL_SEC,
   });
@@ -289,17 +305,17 @@ async function claimSweepLock(sweepId: string): Promise<boolean> {
   }
   return data === true;
 }
-async function releaseSweepLock(sweepId: string): Promise<void> {
+async function releaseSweepLock(tc: TenantCtx, sweepId: string): Promise<void> {
   await admin
     .from("sync_locks")
     .delete()
-    .eq("tenant_id", CURRENT_TENANT_ID)
+    .eq("tenant_id", tc.tenantId)
     .eq("sweep_id", sweepId)
     .then(() => {}, () => {});
 }
 
 // ---------- Contacts sync ----------
-async function syncContacts(mode: string) {
+async function syncContacts(tc: TenantCtx, mode: string) {
   const stats: Record<string, any> = {
     pulled: 0,
     upserted: 0,
@@ -311,7 +327,7 @@ async function syncContacts(mode: string) {
     weight3_total: WEIGHT3_FIELD_KEYS.length,
   };
 
-  const { cf: CF, resolved, missing } = await resolveCustomFieldIds();
+  const { cf: CF, resolved, missing } = await resolveCustomFieldIds(tc);
   stats.custom_fields_resolved = resolved;
   stats.custom_fields_missing = missing;
   console.log(
@@ -319,15 +335,15 @@ async function syncContacts(mode: string) {
       (missing.length ? ` (missing: ${missing.join(", ")})` : "")
   );
 
-  const W3 = await loadTenantWeight3Mapping(CURRENT_TENANT_ID);
+  const W3 = await loadTenantWeight3Mapping(tc.tenantId);
   stats.weight3_mapped = Object.keys(W3).length;
   console.log(
-    `syncContacts: Weight-3 mappings ${stats.weight3_mapped}/${stats.weight3_total} for tenant ${CURRENT_TENANT_ID}`
+    `syncContacts: Weight-3 mappings ${stats.weight3_mapped}/${stats.weight3_total} for tenant ${tc.tenantId}`
   );
   const w3 = (key: Weight3Key, customFields: any) =>
     W3[key] ? extractCustomField(customFields, W3[key]!) : null;
 
-  const st = await getSyncState("contacts");
+  const st = await getSyncState(tc, "contacts");
   let startAfter: string | undefined;
   let startAfterId: string | undefined;
   // Timestamp marking the start of THIS full sweep. Persisted in the resume
@@ -358,8 +374,8 @@ async function syncContacts(mode: string) {
   let timedOut = false;
   while (!stop) {
     if (Date.now() - startedAt > TIME_BUDGET_MS) { timedOut = true; break; }
-    const data = await ghlFetch("/contacts/", {
-      locationId: CURRENT_LOCATION_ID,
+    const data = await ghlFetch(tc, "/contacts/", {
+      locationId: tc.locationId,
       limit: 100,
       startAfter,
       startAfterId,
@@ -369,7 +385,7 @@ async function syncContacts(mode: string) {
 
     const contactRows: any[] = [];
     const contactIdsWithTags: string[] = [];
-    const allTagRows: { ghl_contact_id: string; tag: string }[] = [];
+    const allTagRows: { tenant_id: string; ghl_contact_id: string; tag: string }[] = [];
 
     for (const c of contacts) {
       const updatedMs = c.dateUpdated ? new Date(c.dateUpdated).getTime() : 0;
@@ -400,7 +416,7 @@ async function syncContacts(mode: string) {
         null;
 
       contactRows.push({
-        tenant_id: CURRENT_TENANT_ID,
+        tenant_id: tc.tenantId,
         ghl_contact_id: c.id,
         first_name: c.firstName ?? null,
         last_name: c.lastName ?? null,
@@ -450,7 +466,7 @@ async function syncContacts(mode: string) {
         ? c.tags.filter((t: any) => typeof t === "string" && t.trim())
         : [];
       contactIdsWithTags.push(c.id);
-      for (const t of tags) allTagRows.push({ tenant_id: CURRENT_TENANT_ID, ghl_contact_id: c.id, tag: t });
+      for (const t of tags) allTagRows.push({ tenant_id: tc.tenantId, ghl_contact_id: c.id, tag: t });
     }
 
     if (contactRows.length) {
@@ -478,7 +494,7 @@ async function syncContacts(mode: string) {
       await admin
         .from("ghl_contact_tags")
         .delete()
-        .eq("tenant_id", CURRENT_TENANT_ID)
+        .eq("tenant_id", tc.tenantId)
         .in("ghl_contact_id", contactIdsWithTags);
     }
 
@@ -492,7 +508,7 @@ async function syncContacts(mode: string) {
     if (stop) break;
     startAfter = meta.startAfter;
     startAfterId = meta.startAfterId;
-    await recordProgress("contacts", JSON.stringify({ startAfter, startAfterId, sweepStartedAt }));
+    await recordProgress(tc, "contacts", JSON.stringify({ startAfter, startAfterId, sweepStartedAt }));
     await sleep(80);
   }
 
@@ -506,19 +522,19 @@ async function syncContacts(mode: string) {
   // never reconciles (it only sees changed contacts).
   if (mode === "full" && !timedOut && sweepStartedAt) {
     try {
-      const head = await ghlFetch("/contacts/", { locationId: CURRENT_LOCATION_ID, limit: 1 });
+      const head = await ghlFetch(tc, "/contacts/", { locationId: tc.locationId, limit: 1 });
       const ghlTotal: number | null = typeof head?.meta?.total === "number" ? head.meta.total : null;
       const { count: freshCount } = await admin
         .from("ghl_contacts")
         .select("*", { count: "exact", head: true })
-        .eq("tenant_id", CURRENT_TENANT_ID)
+        .eq("tenant_id", tc.tenantId)
         .gte("synced_at", sweepStartedAt);
       const reconcile: Record<string, any> = { ghl_total: ghlTotal, fresh_this_sweep: freshCount ?? null };
       if (ghlTotal && ghlTotal > 0 && freshCount != null && freshCount >= Math.floor(ghlTotal * 0.9)) {
         const { count: deleted, error } = await admin
           .from("ghl_contacts")
           .delete({ count: "exact" })
-          .eq("tenant_id", CURRENT_TENANT_ID)
+          .eq("tenant_id", tc.tenantId)
           .lt("synced_at", sweepStartedAt);
         if (error) reconcile.error = error.message;
         else { reconcile.deleted = deleted ?? 0; console.log(`syncContacts reconcile: pruned ${deleted ?? 0} contacts deleted in GHL`); }
@@ -537,20 +553,20 @@ async function syncContacts(mode: string) {
 }
 
 // ---------- Opportunities sync ----------
-async function syncOpportunities(mode: string) {
+async function syncOpportunities(tc: TenantCtx, mode: string) {
   const stats = { pulled: 0, upserted: 0, skipped_no_contact: 0 };
   // Determine pipeline filter
   const { data: pipelineConfig } = await admin
     .from("tenant_pipelines")
     .select("ghl_pipeline_id, selected")
-    .eq("tenant_id", CURRENT_TENANT_ID);
+    .eq("tenant_id", tc.tenantId);
   const hasExplicitSelections = Array.isArray(pipelineConfig) && pipelineConfig.length > 0;
   const selectedPipelineIds: string[] | null = hasExplicitSelections
     ? pipelineConfig!.filter((p: any) => p.selected).map((p: any) => String(p.ghl_pipeline_id))
     : null;
 
   if (selectedPipelineIds && selectedPipelineIds.length === 0) {
-    console.warn(`opportunities: tenant ${CURRENT_TENANT_ID} has tenant_pipelines rows but none selected — skipping opportunity sync`);
+    console.warn(`opportunities: tenant ${tc.tenantId} has tenant_pipelines rows but none selected — skipping opportunity sync`);
     return stats;
   }
 
@@ -559,7 +575,7 @@ async function syncOpportunities(mode: string) {
 
   let deltaCutoff: number | null = null;
   if (mode === "delta") {
-    const st = await getSyncState("opportunities");
+    const st = await getSyncState(tc, "opportunities");
     if (st?.last_delta_sync_at) deltaCutoff = new Date(st.last_delta_sync_at).getTime();
   }
 
@@ -569,13 +585,13 @@ async function syncOpportunities(mode: string) {
     let stop = false;
     while (!stop) {
       const params: Record<string, string | number | undefined> = {
-        location_id: CURRENT_LOCATION_ID,
+        location_id: tc.locationId,
         limit: 100,
         startAfter,
         startAfterId,
       };
       if (pipelineId) params.pipeline_id = pipelineId;
-      const data = await ghlFetch("/opportunities/search", params);
+      const data = await ghlFetch(tc, "/opportunities/search", params);
       const opps: any[] = data.opportunities ?? [];
       if (opps.length === 0) break;
 
@@ -599,7 +615,7 @@ async function syncOpportunities(mode: string) {
         const { data: existing, error: exErr } = await admin
           .from("ghl_contacts")
           .select("ghl_contact_id")
-          .eq("tenant_id", CURRENT_TENANT_ID)
+          .eq("tenant_id", tc.tenantId)
           .in("ghl_contact_id", contactIds);
         if (exErr) throw new Error(`opp contact lookup: ${exErr.message}`);
         const existsSet = new Set((existing ?? []).map((r: any) => r.ghl_contact_id));
@@ -611,7 +627,7 @@ async function syncOpportunities(mode: string) {
             continue;
           }
           rows.push({
-            tenant_id: CURRENT_TENANT_ID,
+            tenant_id: tc.tenantId,
             ghl_opportunity_id: o.id,
             ghl_contact_id: o.contactId,
             pipeline_id: o.pipelineId,
@@ -650,7 +666,7 @@ async function syncOpportunities(mode: string) {
 // pipeline_name + stage_name on ghl_opportunities rows by matching
 // pipeline_stage_id. Also refreshes pipeline_name on tenant_pipelines
 // (without touching the `selected` flag).
-async function syncPipelines(_mode: string) {
+async function syncPipelines(tc: TenantCtx, _mode: string) {
   const stats = {
     pipelines_fetched: 0,
     stages_indexed: 0,
@@ -658,8 +674,8 @@ async function syncPipelines(_mode: string) {
     tenant_pipelines_upserted: 0,
   };
 
-  const data = await ghlFetch("/opportunities/pipelines", {
-    locationId: CURRENT_LOCATION_ID,
+  const data = await ghlFetch(tc, "/opportunities/pipelines", {
+    locationId: tc.locationId,
   });
   const pipelines: any[] = Array.isArray(data?.pipelines) ? data.pipelines : [];
   stats.pipelines_fetched = pipelines.length;
@@ -669,12 +685,12 @@ async function syncPipelines(_mode: string) {
   const { data: existingTp } = await admin
     .from("tenant_pipelines")
     .select("ghl_pipeline_id, selected")
-    .eq("tenant_id", CURRENT_TENANT_ID);
+    .eq("tenant_id", tc.tenantId);
   const selectedMap = new Map<string, boolean>(
     (existingTp ?? []).map((r: any) => [String(r.ghl_pipeline_id), !!r.selected]),
   );
   const tpRows = pipelines.map((p) => ({
-    tenant_id: CURRENT_TENANT_ID,
+    tenant_id: tc.tenantId,
     ghl_pipeline_id: String(p.id),
     pipeline_name: String(p.name ?? "Unnamed pipeline"),
     selected: selectedMap.has(String(p.id)) ? selectedMap.get(String(p.id))! : true,
@@ -704,7 +720,7 @@ async function syncPipelines(_mode: string) {
           { pipeline_name: pipelineName, stage_name: stageName },
           { count: "exact" },
         )
-        .eq("tenant_id", CURRENT_TENANT_ID)
+        .eq("tenant_id", tc.tenantId)
         .eq("pipeline_stage_id", stageId);
       if (error) {
         console.warn(`syncPipelines: update failed for stage ${stageId}: ${error.message}`);
@@ -718,14 +734,14 @@ async function syncPipelines(_mode: string) {
 }
 
 // ---------- Conversations sync ----------
-async function syncConversations(mode: string) {
+async function syncConversations(tc: TenantCtx, mode: string) {
   const stats = { pulled: 0, upserted: 0, skipped_no_contact: 0 };
   let startAfterDate: number | undefined;
   let pageCount = 0;
   const MAX_PAGES = 30;
   let deltaCutoff: number | null = null;
   if (mode === "delta") {
-    const st = await getSyncState("conversations");
+    const st = await getSyncState(tc, "conversations");
     if (st?.last_delta_sync_at) deltaCutoff = new Date(st.last_delta_sync_at).getTime();
   }
 
@@ -736,8 +752,8 @@ async function syncConversations(mode: string) {
       console.warn(`conversations: hit MAX_PAGES (${MAX_PAGES}) — breaking to avoid infinite loop`);
       break;
     }
-    const data = await ghlFetch("/conversations/search", {
-      locationId: CURRENT_LOCATION_ID,
+    const data = await ghlFetch(tc, "/conversations/search", {
+      locationId: tc.locationId,
       limit: 100,
       sort: "desc",
       sortBy: "last_message_date",
@@ -770,7 +786,7 @@ async function syncConversations(mode: string) {
       const { data: existing, error: exErr } = await admin
         .from("ghl_contacts")
         .select("ghl_contact_id")
-        .eq("tenant_id", CURRENT_TENANT_ID)
+        .eq("tenant_id", tc.tenantId)
         .in("ghl_contact_id", contactIds);
       if (exErr) throw new Error(`conv contact lookup: ${exErr.message}`);
       const existsSet = new Set((existing ?? []).map((r: any) => r.ghl_contact_id));
@@ -783,7 +799,7 @@ async function syncConversations(mode: string) {
         }
         const body = (cv.lastMessageBody ?? "").toString().slice(0, 500);
         rows.push({
-          tenant_id: CURRENT_TENANT_ID,
+          tenant_id: tc.tenantId,
           ghl_conversation_id: cv.id,
           ghl_contact_id: cv.contactId,
           last_message_type: cv.lastMessageType ?? null,
@@ -824,9 +840,9 @@ async function syncConversations(mode: string) {
 }
 
 // ---------- Users sync ----------
-async function syncUsers(_mode: string) {
+async function syncUsers(tc: TenantCtx, _mode: string) {
   const stats = { pulled: 0, upserted: 0 };
-  const data = await ghlFetch("/users/", { locationId: CURRENT_LOCATION_ID });
+  const data = await ghlFetch(tc, "/users/", { locationId: tc.locationId });
   const users: any[] = data.users ?? [];
   stats.pulled = users.length;
 
@@ -836,9 +852,9 @@ async function syncUsers(_mode: string) {
         Array.isArray(u.roles?.roles) ? u.roles.roles.join(", ")
         : (u.roles?.type ?? u.role ?? null);
       return {
-        tenant_id: CURRENT_TENANT_ID,
+        tenant_id: tc.tenantId,
         ghl_user_id: u.id,
-        location_id: CURRENT_LOCATION_ID,
+        location_id: tc.locationId,
         first_name: u.firstName ?? null,
         last_name: u.lastName ?? null,
         email: u.email ?? null,
@@ -886,10 +902,10 @@ function normalizeDirection(d: any): string {
   return s || "unknown";
 }
 
-async function syncMessages(mode: string) {
+async function syncMessages(tc: TenantCtx, mode: string) {
   const stats = { conversations_scanned: 0, pages_fetched: 0, pulled: 0, upserted: 0, skipped_non_text: 0, contacts_marked_stale: 0 };
   let deltaCutoff: number | null = null;
-  const st = await getSyncState("messages");
+  const st = await getSyncState(tc, "messages");
   if (mode === "delta" && st?.last_delta_sync_at) deltaCutoff = new Date(st.last_delta_sync_at).getTime();
   const resumeOffset = Number(st?.last_delta_cursor ?? 0);
 
@@ -907,7 +923,7 @@ async function syncMessages(mode: string) {
     const { data: convs, error } = await admin
       .from("ghl_conversations")
       .select("ghl_conversation_id, ghl_contact_id, last_message_at")
-      .eq("tenant_id", CURRENT_TENANT_ID)
+      .eq("tenant_id", tc.tenantId)
       .order("last_message_at", { ascending: false, nullsFirst: false })
       .range(offset, offset + PAGE - 1);
     if (error) throw new Error(`messages: read conversations: ${error.message}`);
@@ -919,7 +935,7 @@ async function syncMessages(mode: string) {
       if (deltaCutoff && cv.last_message_at) {
         const lastMs = new Date(cv.last_message_at).getTime();
         if (lastMs <= deltaCutoff) {
-          await recordProgress("messages", String(offset + i + 1));
+          await recordProgress(tc, "messages", String(offset + i + 1));
           continue;
         }
       }
@@ -935,7 +951,7 @@ async function syncMessages(mode: string) {
           if (Date.now() - startedAt > TIME_BUDGET_MS) { timedOut = true; break; }
           const params: Record<string, string | number | undefined> = { limit: 100 };
           if (lastMessageId) params.lastMessageId = lastMessageId;
-          const data = await ghlFetch(`/conversations/${cv.ghl_conversation_id}/messages`, params);
+          const data = await ghlFetch(tc, `/conversations/${cv.ghl_conversation_id}/messages`, params);
           stats.pages_fetched++;
 
           // GHL returns { messages: { messages: [...], lastMessageId } } or similar; handle common shapes.
@@ -968,12 +984,12 @@ async function syncMessages(mode: string) {
             stats.pulled++;
             contactPulled++;
             rows.push({
-              tenant_id: CURRENT_TENANT_ID,
+              tenant_id: tc.tenantId,
               ghl_message_id: m.id,
               ghl_conversation_id: cv.ghl_conversation_id,
               ghl_contact_id: cv.ghl_contact_id,
               ghl_user_id: m.userId ?? null,
-              location_id: CURRENT_LOCATION_ID,
+              location_id: tc.locationId,
               message_type: String(m.messageType ?? m.type ?? "UNKNOWN"),
               direction: normalizeDirection(m.direction),
               body: String(body),
@@ -1007,7 +1023,7 @@ async function syncMessages(mode: string) {
       } catch (e) {
         console.warn(`messages: conv ${cv.ghl_conversation_id} failed`, e instanceof Error ? e.message : e);
       }
-      await recordProgress("messages", String(offset + i + (timedOut ? 0 : 1)));
+      await recordProgress(tc, "messages", String(offset + i + (timedOut ? 0 : 1)));
       await sleep(40);
     }
 
@@ -1022,7 +1038,7 @@ async function syncMessages(mode: string) {
     const { error } = await admin
       .from("lead_intelligence")
       .update({ stale: true })
-      .eq("tenant_id", CURRENT_TENANT_ID)
+      .eq("tenant_id", tc.tenantId)
       .in("ghl_contact_id", ids);
     if (!error) stats.contacts_marked_stale = ids.length;
   }
@@ -1032,7 +1048,7 @@ async function syncMessages(mode: string) {
 }
 
 // ---------- Tasks sync ----------
-async function syncTasks(mode: string) {
+async function syncTasks(tc: TenantCtx, mode: string) {
   // Bulk endpoint: POST /locations/{locationId}/tasks/search
   const stats = { pulled: 0, upserted: 0, pages: 0 };
   const startedAt = Date.now();
@@ -1040,7 +1056,7 @@ async function syncTasks(mode: string) {
   let timedOut = false;
   let firstShapeLogged = false;
 
-  const st = await getSyncState("tasks");
+  const st = await getSyncState(tc, "tasks");
   let nextCursor: string | null = mode === "full" ? null : (st?.last_delta_cursor ?? null);
 
   let deltaCutoff: number | null = null;
@@ -1061,12 +1077,12 @@ async function syncTasks(mode: string) {
       }
     }
 
-    const url = GHL_BASE + "/locations/" + CURRENT_LOCATION_ID + "/tasks/search";
+    const url = GHL_BASE + "/locations/" + tc.locationId + "/tasks/search";
     const res = await fetch(url, {
       method: "POST",
       signal: AbortSignal.timeout(25_000),
       headers: {
-        Authorization: `Bearer ${CURRENT_PIT}`,
+        Authorization: `Bearer ${tc.pit}`,
         Version: GHL_VERSION,
         Accept: "application/json",
         "Content-Type": "application/json",
@@ -1112,11 +1128,11 @@ async function syncTasks(mode: string) {
       const rows = filtered
         .filter((t: any) => t && (t.id || t._id) && (t.contactId || t.contact_id))
         .map((t: any) => ({
-          tenant_id: CURRENT_TENANT_ID,
+          tenant_id: tc.tenantId,
           ghl_task_id: t.id ?? t._id,
           ghl_contact_id: t.contactId ?? t.contact_id,
           ghl_user_id: t.assignedTo ?? t.userId ?? null,
-          location_id: CURRENT_LOCATION_ID,
+          location_id: tc.locationId,
           title: t.title ?? null,
           body: t.body ?? null,
           due_date: maybeDateToIso(t.dueDate),
@@ -1147,11 +1163,11 @@ async function syncTasks(mode: string) {
     nextCursor = newCursor ?? lastSearchAfter ?? (list.length === 100 ? (lastItem?.id ?? lastItem?._id ?? null) : null);
     if (!nextCursor) break;
 
-    await recordProgress("tasks", nextCursor);
+    await recordProgress(tc, "tasks", nextCursor);
     await sleep(150);
   }
 
-  if (!timedOut) await recordProgress("tasks", null);
+  if (!timedOut) await recordProgress(tc, "tasks", null);
 
   console.log(
     `Synced ${stats.upserted} tasks across ${stats.pages} pages${timedOut ? " (time budget hit — call again to continue)" : ""}`,
@@ -1160,7 +1176,7 @@ async function syncTasks(mode: string) {
 }
 
 // ---------- Notes sync ----------
-async function syncNotes(mode: string) {
+async function syncNotes(tc: TenantCtx, mode: string) {
   const stats = {
     contacts_scanned: 0,
     notes_pulled: 0,
@@ -1173,7 +1189,7 @@ async function syncNotes(mode: string) {
   const PAGE = 50;
   let timedOut = false;
 
-  const st = await getSyncState("notes");
+  const st = await getSyncState(tc, "notes");
   let cursor: string = typeof st?.last_delta_cursor === "string" ? st.last_delta_cursor : "";
   // Incremental: in delta mode only re-pull notes for contacts CHANGED since the
   // last notes sync — adding/editing a note bumps the contact's dateUpdated in
@@ -1190,7 +1206,7 @@ async function syncNotes(mode: string) {
     let cq = admin
       .from("ghl_contacts")
       .select("ghl_contact_id")
-      .eq("tenant_id", CURRENT_TENANT_ID)
+      .eq("tenant_id", tc.tenantId)
       .gt("ghl_contact_id", cursor)
       .order("ghl_contact_id", { ascending: true })
       .limit(PAGE);
@@ -1205,7 +1221,7 @@ async function syncNotes(mode: string) {
       stats.contacts_scanned++;
 
       try {
-        const data = await ghlFetch(`/contacts/${contactId}/notes`);
+        const data = await ghlFetch(tc, `/contacts/${contactId}/notes`);
         const list: any[] = Array.isArray(data?.notes)
           ? data.notes
           : Array.isArray(data?.data)
@@ -1217,7 +1233,7 @@ async function syncNotes(mode: string) {
           const { data: existing } = await admin
             .from("ghl_contact_notes")
             .select("ghl_note_id")
-            .eq("tenant_id", CURRENT_TENANT_ID)
+            .eq("tenant_id", tc.tenantId)
             .eq("ghl_contact_id", contactId);
           const existingIds = new Set((existing ?? []).map((r: any) => r.ghl_note_id));
 
@@ -1232,7 +1248,7 @@ async function syncNotes(mode: string) {
             stats.notes_pulled++;
             if (!existingIds.has(noteId)) hasNew = true;
             rows.push({
-              tenant_id: CURRENT_TENANT_ID,
+              tenant_id: tc.tenantId,
               ghl_contact_id: contactId,
               ghl_note_id: noteId,
               body_raw: bodyRaw,
@@ -1259,7 +1275,7 @@ async function syncNotes(mode: string) {
       }
 
       cursor = contactId;
-      await recordProgress("notes", cursor);
+      await recordProgress(tc, "notes", cursor);
       await sleep(150);
     }
 
@@ -1269,7 +1285,7 @@ async function syncNotes(mode: string) {
 
   if (!timedOut) {
     // Clean finish — reset cursor so next run sweeps from the start.
-    await recordProgress("notes", null);
+    await recordProgress(tc, "notes", null);
   }
 
   if (contactsWithNewNotes.size) {
@@ -1277,7 +1293,7 @@ async function syncNotes(mode: string) {
     const { error } = await admin
       .from("lead_intelligence")
       .update({ stale: true })
-      .eq("tenant_id", CURRENT_TENANT_ID)
+      .eq("tenant_id", tc.tenantId)
       .in("ghl_contact_id", ids);
     if (!error) stats.contacts_marked_stale = ids.length;
   }
@@ -1342,6 +1358,9 @@ Deno.serve(async (req) => {
   let historyRowId: string | null = null;
   let sweepId = "";
   let lockClaimed = false;
+  // Hoisted purely so the catch block can release the lock — the real context is
+  // the `const tc` built inside the try, once credentials are known.
+  let lockCtx: TenantCtx | null = null;
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -1427,9 +1446,13 @@ Deno.serve(async (req) => {
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    CURRENT_TENANT_ID = resolvedTenantId;
-    CURRENT_PIT = creds.pit;
-    CURRENT_LOCATION_ID = creds.locationId;
+    // Built per request and passed down explicitly — never module state.
+    const tc: TenantCtx = {
+      tenantId: resolvedTenantId,
+      pit: creds.pit,
+      locationId: creds.locationId,
+    };
+    lockCtx = tc;
 
     // Wallet hard-stop: refuse to sync when balance is empty.
     // Bypassed for: background-internal child invocations, super_admin actors, and tenants with active trial.
@@ -1465,7 +1488,7 @@ Deno.serve(async (req) => {
     // One sweep per tenant. Claim (root) or extend (child, same sweep_id) the
     // lock. If a DIFFERENT live sweep already holds this tenant, skip quietly —
     // this is what stops the scheduled sweep + resume + self-resume stacking up.
-    if (!(await claimSweepLock(sweepId))) {
+    if (!(await claimSweepLock(tc, sweepId))) {
       return new Response(
         JSON.stringify({
           skipped: true,
@@ -1539,20 +1562,20 @@ Deno.serve(async (req) => {
     const runResource = async (r: SyncResource) => {
       try {
         let result: any;
-        if (r === "contacts") result = stats.contacts = await syncContacts(mode);
-        else if (r === "opportunities") result = stats.opportunities = await syncOpportunities(mode);
-        else if (r === "conversations") result = stats.conversations = await syncConversations(mode);
-        else if (r === "users") result = stats.users = await syncUsers(mode);
-        else if (r === "messages") result = stats.messages = await syncMessages(mode);
-        else if (r === "tasks") result = stats.tasks = await syncTasks(mode);
-        else if (r === "notes") result = stats.notes = await syncNotes(mode);
-        else if (r === "pipelines") result = stats.pipelines = await syncPipelines(mode);
+        if (r === "contacts") result = stats.contacts = await syncContacts(tc, mode);
+        else if (r === "opportunities") result = stats.opportunities = await syncOpportunities(tc, mode);
+        else if (r === "conversations") result = stats.conversations = await syncConversations(tc, mode);
+        else if (r === "users") result = stats.users = await syncUsers(tc, mode);
+        else if (r === "messages") result = stats.messages = await syncMessages(tc, mode);
+        else if (r === "tasks") result = stats.tasks = await syncTasks(tc, mode);
+        else if (r === "notes") result = stats.notes = await syncNotes(tc, mode);
+        else if (r === "pipelines") result = stats.pipelines = await syncPipelines(tc, mode);
         if (result?.timed_out) anyTimedOut = true;
-        if (!result?.timed_out) await recordSuccess(r, mode);
+        if (!result?.timed_out) await recordSuccess(tc, r, mode);
         return result;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        await recordFailure(r, msg);
+        await recordFailure(tc, r, msg);
         throw e;
       }
     };
@@ -1592,7 +1615,7 @@ Deno.serve(async (req) => {
     // Release the tenant lock when the sweep is fully done. If a continuation
     // was dispatched, that child re-claims/extends the lock; otherwise this is
     // the terminal invocation, so free the tenant for the next sweep.
-    if (lockClaimed && !dispatchedContinuation) { await releaseSweepLock(sweepId); lockClaimed = false; }
+    if (lockClaimed && !dispatchedContinuation) { await releaseSweepLock(tc, sweepId); lockClaimed = false; }
 
     // Mark sync_history row complete
     if (historyRowId) {
@@ -1619,7 +1642,7 @@ Deno.serve(async (req) => {
   } catch (e) {
     // Free the tenant lock so a failed resource doesn't block the next sweep for
     // the full TTL. (No-op if we never claimed it.)
-    if (lockClaimed) { await releaseSweepLock(sweepId); lockClaimed = false; }
+    if (lockClaimed && lockCtx) { await releaseSweepLock(lockCtx, sweepId); lockClaimed = false; }
     // Mark sync_history row failed if we created one
     if (historyRowId) {
       const errMsg = e instanceof Error ? e.message : String(e);

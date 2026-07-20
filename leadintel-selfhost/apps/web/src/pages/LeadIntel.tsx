@@ -240,13 +240,29 @@ export default function LeadIntelPage() {
   }, [aiTesting]);
   const { leads: remoteLeads, loading: leadsLoading } = useLeads(ghlUserMap);
   const [leads, setLeads] = useState<Lead[]>([]);
+
+  // Drop the list the INSTANT the tenant changes, before the refetch returns.
+  // Without this, "keep a populated list" (below) means a super-admin switching
+  // customers keeps seeing the previous customer's leads under the new
+  // customer's name — one tenant's data displayed as another's. useLeads
+  // refetches on the same change, so this window is brief, but during it the
+  // screen is actively lying about whose leads these are.
+  const tenantKey = currentTenant?.id ?? null;
+  const shownTenant = useRef<string | null>(tenantKey);
+  useEffect(() => {
+    if (shownTenant.current !== tenantKey) {
+      shownTenant.current = tenantKey;
+      setLeads([]);
+    }
+  }, [tenantKey]);
+
   useEffect(() => {
     if (remoteLeads.length === 0) return;
     // Adopt fresh data on first load, and again any time we're showing nothing —
     // which is what happens when the page is opened during a tenant's first sync
-    // and useLeads later refetches. Deliberately never replaces a list that
-    // already has rows: `leads` carries local edits (stage moves, assignment,
-    // touch counts) that a refetch would otherwise wipe mid-session.
+    // and useLeads later refetches, or right after a tenant switch clears above.
+    // Won't replace a list that already has rows: `leads` carries local edits
+    // (stage moves, assignment, touch counts) a refetch would wipe mid-session.
     setLeads((prev) => (prev.length === 0 ? remoteLeads : prev));
   }, [remoteLeads]);
   const [callLog, setCallLog] = useState<CallLogEntry[]>(() => { try { const s = localStorage.getItem("leadIntel_callLog"); if (s) return JSON.parse(s); } catch {} return []; });

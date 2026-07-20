@@ -98,6 +98,16 @@ export function useLeads(userMap?: Map<string, GhlUser>) {
     return () => clearInterval(t);
   }, [syncing, leads.length]);
 
+  // Never hand back one tenant's rows while fetching another's. Without this the
+  // hook keeps serving the previous tenant's leads for the whole refetch, and a
+  // consumer that just cleared its list on the tenant switch would immediately
+  // re-adopt them — the stale rows reappear under the new tenant's name.
+  const fetchedFor = useRef<string | null>(tenantFilter);
+  if (fetchedFor.current !== tenantFilter) {
+    fetchedFor.current = tenantFilter;
+    if (leads.length > 0) setLeads([]);
+  }
+
   useEffect(() => {
     if (!ready) return;
     let cancelled = false;
