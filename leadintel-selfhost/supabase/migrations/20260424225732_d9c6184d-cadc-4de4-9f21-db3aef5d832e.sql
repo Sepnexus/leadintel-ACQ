@@ -1,2 +1,29 @@
-TRUNCATE public.ghl_contact_tags;
-TRUNCATE public.ghl_contacts CASCADE;
+-- NEUTRALISED 2026-07-21. Do not restore the statements below.
+--
+-- This file used to be exactly:
+--
+--     TRUNCATE public.ghl_contact_tags;
+--     TRUNCATE public.ghl_contacts CASCADE;
+--
+-- a one-time cleanup from April. The problem is that docker/init-db.sh replays
+-- EVERY migration on each container start ("existing Postgres cluster detected;
+-- replaying migrations (idempotent)") — and a TRUNCATE is not idempotent. It is
+-- destructive every single time.
+--
+-- On 2026-07-21 a restart of the leadintel container (pulled in as a compose
+-- dependency of leadintel-edge) replayed this file and wiped every tenant's
+-- synced GHL data: contacts and tags directly, then opportunities,
+-- conversations, messages, tasks and ghl_users via CASCADE. Notes and
+-- tenant_pipelines survived only because nothing cascades to them. Everything
+-- had to be re-pulled from GHL.
+--
+-- This is the real reason behind the "never restart the leadintel container"
+-- rule in VPS-DEPLOY.md. That rule lived in a document; the hazard lived here.
+-- Now it doesn't.
+--
+-- Intentionally left as a no-op so migration ordering and any checksum history
+-- stay intact. If a future migration genuinely needs to clear a table, guard it
+-- so it cannot fire on replay (e.g. a marker row in a migrations_applied table,
+-- or a WHERE clause that is empty the second time).
+
+SELECT 1;
