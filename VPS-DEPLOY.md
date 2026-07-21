@@ -217,15 +217,45 @@ Admin → Users to give yourself + your team real passwords.
 
 ## Updating later
 
-> ## ⚠️ READ THIS FIRST — `leadintel` container WIPES DATA on rebuild
+> ## ⚠️ READ THIS FIRST — restarting `leadintel` has wiped data before
 >
-> The `leadintel` container's `start.sh` re-initializes Postgres every fresh
-> container start. So a naive `docker compose up -d --build leadintel`
-> **destroys all tenants, contacts, sync history, and user accounts** on the
-> VPS. See `leadintel-selfhost/CLAUDE.md`.
+> **Never restart or recreate the `leadintel` container, and always pass
+> `--no-deps` when touching anything that depends on it.**
 >
-> Until that's fixed in the image (see Open issues below), use the safe
-> recipe **for code-only updates to Lead Intel**.
+> What actually happens (the earlier "start.sh re-initializes Postgres"
+> explanation was wrong): `docker/init-db.sh` detects the existing cluster and
+> **replays every migration** on each start, logging "replaying migrations
+> (idempotent)". Two migrations were not idempotent — `20260424225732` was
+> `TRUNCATE ghl_contact_tags; TRUNCATE ghl_contacts CASCADE;`, a one-time April
+> cleanup that re-ran destructively on every restart. Both were neutralised to
+> `SELECT 1` on 2026-07-21 (commit d582e18), so this specific hazard is
+> disarmed — but the rule stands, because any future non-idempotent migration
+> would arm it again.
+>
+> **2026-07-21 incident:** `docker compose up -d --force-recreate leadintel-edge`
+> pulled `leadintel` in as a compose dependency and restarted it. The TRUNCATE
+> replayed and emptied every tenant's synced GHL data — contacts and tags
+> directly, then opportunities, conversations, messages, tasks and ghl_users via
+> CASCADE. Notes and tenant_pipelines survived (nothing cascades to them), and
+> that asymmetry is what identified the cause. Tenants, tokens, users, wallets
+> and all platform data were untouched, and everything was recovered by
+> re-syncing from GHL — but it cost hours, and every customer saw an empty app
+> meanwhile.
+>
+> Naming one service does **not** limit the blast radius. Use `--no-deps`:
+>
+> ```bash
+> docker compose -f docker-compose.vps.yml up -d --no-deps --force-recreate leadintel-edge
+> ```
+>
+> Before and after ANY deploy that could reach it, prove the data survived:
+>
+> ```bash
+> docker exec leadintel psql -U postgres -d leadintel -tAc \
+>   "SELECT (SELECT count(*) FROM tenants) t, (SELECT count(*) FROM ghl_contacts) c;"
+> ```
+>
+> For code-only updates to Lead Intel, use the safe recipe below.
 >
 > ⚠️ **This VPS host has NO `npm`/Node** — `npm run build` fails with
 > `command not found`. Build the frontend *inside Docker* (`docker compose
@@ -246,13 +276,19 @@ Admin → Users to give yourself + your team real passwords.
 > docker exec leadintel nginx -s reload
 > ```
 >
-> For Lead Intel **edge function** changes, rebuilding `leadintel-edge` is
-> safe (separate container, no DB):
+> For Lead Intel **edge function** changes, `leadintel-edge` is a separate
+> container with no DB of its own — but it `depends_on` leadintel, so it must
+> be recreated with `--no-deps` or compose restarts leadintel too (this is
+> exactly what caused the 2026-07-21 wipe):
 >
 > ```bash
 > cd /root/sepnexus-platform/leadintel-selfhost
-> docker compose up -d --build leadintel-edge
+> docker compose up -d --no-deps --build leadintel-edge
 > ```
+>
+> The functions are bind-mounted (`./supabase/functions:/home/deno/functions:ro`),
+> so a `git pull` plus recreating the edge container is all a function change
+> needs — no image rebuild.
 >
 > The other 7 services (acq-coach, platform-db, platform-auth,
 > platform-admin-api, platform-launcher, acq-edge, leadintel-edge) ARE safe
@@ -285,12 +321,31 @@ Database data on the OTHER services (platform-db, acq-coach) survives — those
 use proper Docker volumes (`platform_pgdata`, `acq_pgdata`) that persist across
 container rebuilds.
 
-### Open issue: fix the leadintel wipe-on-init bug
+### Resolved 2026-07-21: the leadintel wipe-on-restart bug
 
-The right fix is to update `leadintel-selfhost/docker/start.sh` to detect
-"data already exists" and skip the init step — same pattern the iBuyKC
-`init-db.sh` uses. This is a deferred task; once landed, the safe-update
-recipe above can drop the special-case for `leadintel`.
+`init-db.sh` already detects an existing cluster and skips initialisation — the
+old "start.sh re-initializes Postgres" diagnosis was wrong. The real hazard was
+that it **replays every migration** on each start, and two migrations were
+one-time cleanups that are destructive on replay:
+
+- `20260424225732` — `TRUNCATE ghl_contact_tags; TRUNCATE ghl_contacts CASCADE;`
+- `20260427210112` — `DELETE FROM day_briefing_cache;`
+
+Both are now no-ops (`SELECT 1`), keeping migration ordering intact, with the
+incident recorded in each file. Verify on the VPS after any pull:
+
+```bash
+grep -c '^TRUNCATE' leadintel-selfhost/supabase/migrations/20260424225732_*.sql   # must be 0
+```
+
+**Rule for new migrations:** anything that deletes data must be safe to run a
+second time — guard it with a marker row, or a WHERE clause that matches nothing
+on the second pass. A migration in this repo is not applied once; it is applied
+on every container start, forever.
+
+Still deferred: a `docker compose up -d --build leadintel` (fresh container)
+remains untested and is not part of any routine — keep using the build-and-copy
+recipe above for frontend changes.
 
 ---
 
