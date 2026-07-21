@@ -5107,7 +5107,7 @@ export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
         // so all reads go through the standard path — RLS, joins, counts all work.
         const usersRes=await proxy("list-users");
         const users=usersRes.users||[];
-        const [scoresRes, contactsRes, pendingCallsRes, scoredCallsRes] = await Promise.all([
+        const [scoresRes, contactsRes, pendingCallsRes, scoredCallsRes, convosRes] = await Promise.all([
           supabase.from("call_scores").select("*").eq("account_id",selectedAccount).order("scored_at",{ascending:false}).limit(500),
           supabase.from("ghl_contacts").select("assigned_user_id,ghl_contact_id,name").eq("account_id",selectedAccount),
           supabase.from("ghl_calls").select("id,assigned_user_id,call_duration,call_date,transcript,contact_id,call_status,direction,raw_data").eq("account_id",selectedAccount).not("transcript","is",null).is("score_id",null).order("call_date",{ascending:false}).limit(200),
@@ -5115,6 +5115,10 @@ export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
           // the seller's identity lives on the ghl_calls row (score_id → contact_id).
           // Pull it so we can recover the real name when call_scores.seller_name is blank.
           supabase.from("ghl_calls").select("score_id,contact_id,direction,raw_data").eq("account_id",selectedAccount).not("score_id","is",null).limit(1000),
+          // GHL conversations carry the contact's name (raw_data.contactName / fullName)
+          // even for contacts never synced into ghl_contacts — the real source of the
+          // seller's identity for most "Unknown" calls. Keyed by contact_id.
+          supabase.from("ghl_conversations").select("contact_id,raw_data").eq("account_id",selectedAccount).limit(5000),
         ]);
 
         const scores=(scoresRes.data||[]);
@@ -5124,6 +5128,16 @@ export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
         // resolveContactName below can fall through to the phone-number fallback).
         const contactNameMap={};
         contacts.forEach(c=>{if(c.ghl_contact_id)contactNameMap[c.ghl_contact_id]=(c.name||"").trim();});
+
+        // Contact name from GHL conversations (raw_data.contactName / fullName), keyed by
+        // contact_id. Recovers names for contacts missing from ghl_contacts — which is
+        // most of the "Unknown" calls. One conversation per contact, so first non-empty wins.
+        const convNameMap={};
+        (convosRes.data||[]).forEach(cv=>{
+          const cid=cv.contact_id; if(!cid||convNameMap[cid])return;
+          const nm=((cv.raw_data&&(cv.raw_data.contactName||cv.raw_data.fullName))||"").trim();
+          if(nm)convNameMap[cid]=nm;
+        });
 
         // Scored calls carry the seller's identity on their ghl_calls row, not on
         // call_scores. Map call_scores.id → the linked call's contact + raw payload.
@@ -5144,13 +5158,15 @@ export default function ACQCoach({onSwitchView,isSuperAdmin=false}){
           if(isPhone(raw.to))return raw.to;
           return"";
         };
-        // Best-available contact name: stored seller_name → linked GHL contact name
-        // → the lead's phone number → a clean "No contact linked" (never "Unknown").
+        // Best-available contact name: stored seller_name → GHL contact name → GHL
+        // conversation name → the lead's phone number → "No contact linked" (never "Unknown").
         const resolveContactName=(rawName,contactId,raw,direction)=>{
           const n=(rawName||"").trim();
           if(n&&n.toLowerCase()!=="unknown")return n;
           const byContact=contactId?(contactNameMap[contactId]||""):"";
           if(byContact&&byContact.toLowerCase()!=="unknown")return byContact;
+          const byConvo=contactId?(convNameMap[contactId]||""):"";
+          if(byConvo&&byConvo.toLowerCase()!=="unknown")return byConvo;
           const phone=leadPhone(raw,direction);
           if(phone)return phone;
           return"No contact linked";
