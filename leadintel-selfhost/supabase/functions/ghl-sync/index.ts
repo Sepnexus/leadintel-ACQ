@@ -186,6 +186,16 @@ async function ghlFetch(tc: TenantCtx, path: string, params: Record<string, stri
     }
     if (!res.ok) {
       const body = await res.text();
+      // GHL reports its OWN internal timeout as a 400, not a 504:
+      //   {"message":"Request Timeout after 30000ms","error":"Bad Request","statusCode":400}
+      // A 400 normally means "the request is malformed, retrying is pointless",
+      // so without this special case the most common real failure in
+      // sync_history goes unretried and kills the tenant's entire run. Match on
+      // the body text rather than the status, so genuine 400s still fail fast.
+      if (attempt < 4 && res.status === 400 && /request timeout/i.test(body)) {
+        await sleep(2000 * (attempt + 1));
+        continue;
+      }
       throw new Error(`GHL ${res.status} ${path}: ${body}`);
     }
     return res.json();
