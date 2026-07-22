@@ -14,6 +14,11 @@ const corsHeaders = {
 
 const GHL_BASE = "https://services.leadconnectorhq.com";
 const GHL_VERSION = "2021-07-28";
+// Per-request timeout to GHL. Was 25s, which GHL routinely exceeds when we are
+// sweeping many tenants at once — the timeout then aborted the whole resource
+// sync. Raised, and paired with the retry in ghlFetch. Still well inside the
+// 90s per-resource budget, so a slow page costs a retry, not the run.
+const GHL_REQUEST_TIMEOUT_MS = 45_000;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -142,19 +147,41 @@ async function ghlFetch(tc: TenantCtx, path: string, params: Record<string, stri
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url.toString(), {
-      signal: AbortSignal.timeout(25_000),
-      headers: {
-        Authorization: `Bearer ${tc.pit}`,
-        Version: GHL_VERSION,
-        Accept: "application/json",
-      },
-    });
+    let res: Response;
+    try {
+      res = await fetch(url.toString(), {
+        signal: AbortSignal.timeout(GHL_REQUEST_TIMEOUT_MS),
+        headers: {
+          Authorization: `Bearer ${tc.pit}`,
+          Version: GHL_VERSION,
+          Accept: "application/json",
+        },
+      });
+    } catch (e) {
+      // A timeout or dropped connection used to throw straight out of here,
+      // aborting the whole resource sync for that tenant — one slow page killed
+      // an entire contacts run ("Signal timed out" in sync_history). GHL gets
+      // slow exactly when we hammer it (a full sweep across all tenants), so
+      // this is the common case during recovery, not a rare one. Retry it the
+      // same way we already retry a 429.
+      const msg = e instanceof Error ? e.message : String(e);
+      const retryable = /timed out|timeout|aborted|connection|network|reset/i.test(msg);
+      if (retryable && attempt < 4) {
+        await sleep(2000 * (attempt + 1));
+        continue;
+      }
+      throw new Error(`GHL ${path}: ${msg}`);
+    }
     // GHL rate limit — honor Retry-After (or back off) and retry a few times so
     // a transient 429 doesn't kill the whole resource sync (e.g. opportunities).
     if (res.status === 429 && attempt < 4) {
       const retryAfter = Number(res.headers.get("Retry-After")) || 0;
       await sleep(retryAfter > 0 ? retryAfter * 1000 : 1000 * (attempt + 1));
+      continue;
+    }
+    // 5xx is GHL being unwell, not us — same treatment.
+    if (res.status >= 500 && attempt < 4) {
+      await sleep(2000 * (attempt + 1));
       continue;
     }
     if (!res.ok) {

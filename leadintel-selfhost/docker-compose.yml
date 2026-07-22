@@ -25,6 +25,17 @@ services:
     networks:
       - leadintel-net
       - platform-shared
+    # Cap the log file — Postgres + nginx + GoTrue all log to stdout here, and
+    # json-file grows without limit by default. NOTE: Docker only applies a
+    # logging change when the container is RECREATED, which for leadintel is the
+    # one thing never to do casually (see VPS-DEPLOY.md). Until it is next
+    # recreated deliberately, truncate the live log in place instead:
+    #   truncate -s 0 $(docker inspect --format='{{.LogPath}}' leadintel)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   leadintel-edge:
     image: supabase/edge-runtime:v1.58.4
