@@ -38,6 +38,9 @@ export interface Lead {
   marketValue?: number | null;
   lastContactAt?: string | null;
   lastInboundAt?: string | null;
+  /** When the contact first appeared in GHL. Lets the Today list exempt
+   *  brand-new leads from the "seller has replied" gate. */
+  createdAt?: string | null;
   openTaskCount?: number;
   overdueTaskCount?: number;
   mostOverdueDays?: number | null;

@@ -255,6 +255,7 @@ export function useLeads(userMap?: Map<string, GhlUser>) {
             marketValue: c.market_value != null ? Number(c.market_value) : null,
             lastContactAt,
             lastInboundAt,
+            createdAt: c.ghl_date_added ?? null,
             openTaskCount: ts?.open ?? 0,
             overdueTaskCount: ts?.overdue ?? 0,
             mostOverdueDays: ts?.mostOverdueDays ?? null,

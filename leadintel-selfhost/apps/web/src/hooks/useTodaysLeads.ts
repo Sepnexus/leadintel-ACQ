@@ -10,6 +10,58 @@ export interface ScoredLead {
   rationale: string;
 }
 
+// ── Who belongs on the Today list at all ──────────────────────────────────
+//
+// Today answers "who do I call right now", so it lists sellers who are actually
+// in a conversation: someone who REPLIED within the last 60 days. Outbound-only
+// contacts — we messaged, they never answered — do not qualify.
+//
+// This matters because the scoring below rewards profile completeness heavily:
+// notes, asking price, condition, motivation and friends are worth ~160 points
+// between them, and 5+ of those trigger the x2 stack, while going quiet costs
+// only a few points. Without this gate a lead who filled in a detailed form 18
+// months ago and never replied since outranks someone who texted back
+// yesterday. Gating on a reply fixes that at the root rather than endlessly
+// re-tuning weights.
+//
+// Nothing is deleted or hidden from the product: quiet leads stay in All Leads
+// and Pipeline. They just stop crowding out live conversations on Today.
+const REPLY_WINDOW_DAYS = 60;
+const NEW_LEAD_GRACE_DAYS = 14;
+
+function daysAgo(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 86_400_000);
+}
+
+/** The seller replied inside the window — a real back-and-forth. */
+function hasRecentReply(lead: Lead): boolean {
+  const d = daysAgo(lead.lastInboundAt);
+  return d !== null && d <= REPLY_WINDOW_DAYS;
+}
+
+/** Brand-new and not yet worked. Exempt — otherwise the gate would bury
+ *  exactly the fresh leads the briefing is meant to fast-track. */
+function isUnworkedNewLead(lead: Lead): boolean {
+  if ((lead.touches ?? 0) > 0) return false;
+  const age = daysAgo(lead.createdAt);
+  return age !== null && age <= NEW_LEAD_GRACE_DAYS;
+}
+
+/** A follow-up that's due, or an overdue task, is a commitment already made —
+ *  it earns a slot even without a recent reply. */
+function hasOpenCommitment(lead: Lead): boolean {
+  if ((lead.overdueTaskCount ?? 0) > 0) return true;
+  const due = daysAgo(lead.follow_up_due_date);
+  return due !== null && due >= 0; // due today or already overdue
+}
+
+export function qualifiesForToday(lead: Lead): boolean {
+  return hasRecentReply(lead) || isUnworkedNewLead(lead) || hasOpenCommitment(lead);
+}
+
 function hasTag(lead: Lead, name: string): boolean {
   if (!lead.tags) return false;
   const target = name.toLowerCase();
@@ -188,6 +240,21 @@ const scoreFor = (lead: Lead): number => {
   // ── NOTES (Weight-3) ──
   if (lead.has_notes) { score += 30; weight3Count++; }
 
+  // ── INBOUND REPLY (Weight-3) ──
+  // The single strongest buying signal: the seller wrote back. Scored
+  // separately from CONVERSATION RECENCY below, which counts any activity and
+  // so treats "I called them" the same as "they answered me". Without this a
+  // seller who replied yesterday ranks level with an untouched new lead, which
+  // is precisely the ordering the reply gate is meant to fix.
+  const replyDays = daysAgo(lead.lastInboundAt);
+  if (replyDays !== null) {
+    if (replyDays <= 3)       { score += 120; weight3Count++; }
+    else if (replyDays <= 7)  { score += 100; weight3Count++; }
+    else if (replyDays <= 14) { score += 70;  weight3Count++; }
+    else if (replyDays <= 30) { score += 40;  weight3Count++; }
+    else                        score += 20;
+  }
+
   // ── CONVERSATION RECENCY (Weight-3) ──
   if (lead.last_contact_days != null) {
     if (lead.last_contact_days === 0)       score += 40;
@@ -218,9 +285,15 @@ export function useTodaysLeads(allLeads: Lead[], topN: number = 10): {
   scored: ScoredLead[];
   counts: { all: number; hot: number; warm: number; cold: number };
   totalEstimatedValue: number;
+  /** Leads held back by the reply gate — still in All Leads, just not Today. */
+  quietCount: number;
 } {
   return useMemo(() => {
-    const ranked = allLeads
+    // Only sellers in a live conversation (or brand-new / already committed to).
+    const eligible = allLeads.filter(qualifiesForToday);
+    const quietCount = allLeads.length - eligible.length;
+
+    const ranked = eligible
       .map((lead) => {
         const score = scoreFor(lead);
         return { lead, score };
@@ -247,6 +320,6 @@ export function useTodaysLeads(allLeads: Lead[], topN: number = 10): {
       counts[s.tier]++;
       totalEstimatedValue += s.lead.estimatedEquity ?? s.lead.marketValue ?? 0;
     }
-    return { scored, counts, totalEstimatedValue };
+    return { scored, counts, totalEstimatedValue, quietCount };
   }, [allLeads, topN]);
 }
